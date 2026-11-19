@@ -5,17 +5,12 @@
  */
 
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Building2, FileText } from 'lucide-react';
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-} from 'recharts';
-import { useSchoolAdminDashboard } from '../../../hooks';
+import { useFeeReport, useSchoolAdminDashboard } from '../../../hooks';
+import { useTheme } from '../../../context/ThemeContext';
+import { FeeCollectionChart, getChartTheme } from '../reports';
 
 interface SchoolAdminDashboardViewProps {
   user: any;
@@ -30,29 +25,16 @@ const getTimeGreeting = (): string => {
 };
 
 export const SchoolAdminDashboardView: React.FC<SchoolAdminDashboardViewProps> = ({ user }) => {
+  const navigate = useNavigate();
   const { data: dashboardData } = useSchoolAdminDashboard();
+  const { resolvedTheme } = useTheme();
+  const chartTheme = getChartTheme(resolvedTheme === 'dark' ? 'dark' : 'light');
   const kpi = dashboardData?.kpi;
 
-  const feeMonthlyData = [
-    {
-      month: 'Apr (Q1)',
-      collected: kpi?.fees?.totalCollected
-        ? Math.round((kpi.fees.totalCollected / 100000) * 10) / 10
-        : 0,
-      target: kpi?.fees?.totalBilled
-        ? Math.round((kpi.fees.totalBilled / 100000) * 10) / 10
-        : 10,
-    },
-    { month: 'Jul (Q2)', collected: 0, target: 10 },
-    { month: 'Oct (Q3)', collected: 0, target: 10 },
-    { month: 'Jan (Q4)', collected: 0, target: 10 },
-  ];
 
-  const classAttendance = [
-    { class: 'Class 10', percent: kpi?.todayAttendance?.rate || 0 },
-    { class: 'Class 9', percent: kpi?.todayAttendance?.rate || 0 },
-    { class: 'Class 8', percent: kpi?.todayAttendance?.rate || 0 },
-  ];
+  const feeReportQuery = useFeeReport();
+  const upcomingExams: any[] = dashboardData?.upcomingExams ?? [];
+  const recentNotices: any[] = dashboardData?.recentAnnouncements ?? [];
 
   const isBrandNewSchool = !kpi?.totalStudents && !kpi?.totalTeachers;
 
@@ -211,43 +193,80 @@ export const SchoolAdminDashboardView: React.FC<SchoolAdminDashboardViewProps> =
         </div>
       </div>
 
-      {/* Charts Grid: Fee Collection Ledger + Class Attendance */}
+      {/* Fee collection (real, per fee structure) + upcoming exams & notices */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-surface rounded-3xl p-6 border border-border shadow-card">
-          <h3 className="text-base font-bold text-primary mb-1">Quarterly Fee Collections (₹ in Lakhs)</h3>
-          <p className="text-xs text-muted mb-6">Target vs Collected by Academic Quarter</p>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={feeMonthlyData}>
-                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748B' }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#94A3B8' }} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#1E293B', borderRadius: '16px', color: '#fff', border: 'none' }}
-                />
-                <Bar dataKey="collected" fill="#38BDF8" name="Collected (₹ Lakhs)" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="target" fill="#E2E8F0" name="Total Target (₹ Lakhs)" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div>
+              <h3 className="text-base font-bold text-primary">Fee Collection by Fee Structure</h3>
+              <p className="text-xs text-muted">Collected vs pending</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/reports')}
+              className="text-xs font-bold text-accent-blue hover:underline cursor-pointer"
+            >
+              Full report →
+            </button>
           </div>
+          {feeReportQuery.isLoading ? (
+            <div className="h-40 rounded-2xl bg-surface-raised animate-pulse" aria-busy="true" />
+          ) : (feeReportQuery.data?.feeStructures ?? []).length === 0 ? (
+            <div className="h-40 flex items-center justify-center rounded-2xl bg-surface-raised border border-dashed border-border text-xs text-muted">
+              {feeReportQuery.isError ? 'Could not load fee data.' : 'No fee structures yet — create one in Finance.'}
+            </div>
+          ) : (
+            <FeeCollectionChart structures={feeReportQuery.data!.feeStructures} theme={chartTheme} />
+          )}
         </div>
 
-        <div className="bg-surface rounded-3xl p-6 border border-border shadow-card">
-          <h3 className="text-base font-bold text-primary mb-4">Class-wise Attendance %</h3>
-          <div className="space-y-3">
-            {classAttendance.map((c, i) => (
-              <div key={i} className="space-y-1">
-                <div className="flex justify-between text-xs font-bold">
-                  <span className="text-secondary">{c.class}</span>
-                  <span className="text-accent-blue">{c.percent}%</span>
-                </div>
-                <div className="w-full h-2 rounded-full bg-surface-raised overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-accent-blue"
-                    style={{ width: `${c.percent}%` }}
-                  ></div>
-                </div>
+        <div className="bg-surface rounded-3xl p-6 border border-border shadow-card space-y-5">
+          <div>
+            <h3 className="text-base font-bold text-primary mb-3">Upcoming Exams</h3>
+            {upcomingExams.length === 0 ? (
+              <p className="text-xs text-muted">No upcoming exams scheduled.</p>
+            ) : (
+              <div className="space-y-2">
+                {upcomingExams.map((e) => (
+                  <button
+                    type="button"
+                    key={e.id}
+                    onClick={() => navigate('/exams')}
+                    className="w-full text-left p-3 rounded-2xl bg-surface-raised border border-border hover:border-accent-blue/40 transition-all cursor-pointer"
+                  >
+                    <p className="text-xs font-bold text-primary">{e.name}</p>
+                    <p className="text-[11px] text-muted mt-0.5">
+                      {new Date(e.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                      {e.endDate ? ` – ${new Date(e.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}
+                      {e._count?.subjects ? ` • ${e._count.subjects} subjects` : ''}
+                    </p>
+                  </button>
+                ))}
               </div>
-            ))}
+            )}
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-primary mb-3">Recent Notices</h3>
+            {recentNotices.length === 0 ? (
+              <p className="text-xs text-muted">No notices published yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {recentNotices.slice(0, 3).map((n) => (
+                  <button
+                    type="button"
+                    key={n.id}
+                    onClick={() => navigate('/announcements')}
+                    className="w-full text-left p-3 rounded-2xl bg-surface-raised border border-border hover:border-accent-blue/40 transition-all cursor-pointer"
+                  >
+                    <p className="text-xs font-bold text-primary line-clamp-1">{n.title}</p>
+                    <p className="text-[11px] text-muted mt-0.5">
+                      {typeof n.author === 'string' ? n.author : n.author?.name ?? 'School office'} •{' '}
+                      {new Date(n.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

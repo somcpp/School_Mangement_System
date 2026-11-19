@@ -21,7 +21,8 @@ import {
   Calendar,
   FileText,
 } from 'lucide-react';
-import { useInvoices, useCollectPayment } from '../../../hooks';
+import { useQueryClient } from '@tanstack/react-query';
+import { FINANCE_KEYS, useInvoices } from '../../../hooks';
 import type { StudentFeeInstallment, FeeInvoice } from '../../../types';
 import { api } from '../../../lib/api';
 import { openRazorpayModal } from '../../../utils/razorpay';
@@ -44,7 +45,9 @@ export const StudentPersonalFeesView: React.FC<StudentPersonalFeesViewProps> = (
   const studentId = user?.studentProfile?.id;
   // No `= []` default here: a fresh array each render would retrigger the sync effect below forever
   const { data: liveInvoices, isLoading: isInvoicesLoading } = useInvoices({ studentId });
-  const { mutate: collectPayment, isPending: isProcessingPayment } = useCollectPayment();
+  const queryClient = useQueryClient();
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
 
   // Sync live invoices
   React.useEffect(() => {
@@ -85,91 +88,52 @@ export const StudentPersonalFeesView: React.FC<StudentPersonalFeesViewProps> = (
   const handlePayFee = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!payingInstallment) return;
+    setPaymentError(null);
+    setIsProcessingPayment(true);
 
-    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payingInstallment.id);
-    let razorpayTxnId = `UPI/${Date.now()}`;
-
-    if (isUUID) {
-      try {
-        // 1. Create order on backend via Razorpay
-        const orderRes = await api.post('/finance/payments/create-order', {
-          feeInvoiceId: payingInstallment.id,
-          amount: payingInstallment.balanceAmount,
-        });
-        const orderData = orderRes.data?.data;
-
-        if (orderData?.orderId && orderData?.keyId) {
-          // 2. Open Razorpay modal
-          const rzp = await openRazorpayModal({
-            key: orderData.keyId,
-            amount: orderData.amount,
-            currency: 'INR',
-            name: user?.school?.name || 'SchoolHub Fee Portal',
-            description: `Payment for Invoice ${payingInstallment.invoiceNo}`,
-            order_id: orderData.orderId,
-            prefill: {
-              name: user?.name,
-              email: user?.email,
-            },
-          });
-
-          // 3. Verify on backend
-          await api.post('/finance/payments/verify', {
-            feeInvoiceId: payingInstallment.id,
-            amount: payingInstallment.balanceAmount,
-            razorpayOrderId: rzp.razorpay_order_id,
-            razorpayPaymentId: rzp.razorpay_payment_id,
-            razorpaySignature: rzp.razorpay_signature,
-          });
-
-          razorpayTxnId = rzp.razorpay_payment_id;
-        } else {
-          // Fallback to collectPayment endpoint if key not returned
-          collectPayment({
-            feeInvoiceId: payingInstallment.id,
-            amount: payingInstallment.balanceAmount,
-            paymentMethod: paymentMethod === 'UPI' ? 'UPI' : paymentMethod === 'CARD' ? 'CARD' : 'BANK_TRANSFER',
-            transactionRef: razorpayTxnId,
-            remarks: `Online payment via ${paymentMethod}`,
-          });
-        }
-      } catch (err: any) {
-        if (err.message?.includes('cancelled')) {
-          return; // User dismissed Razorpay popup
-        }
-        // Fallback to direct collection
-        collectPayment({
-          feeInvoiceId: payingInstallment.id,
-          amount: payingInstallment.balanceAmount,
-          paymentMethod: paymentMethod === 'UPI' ? 'UPI' : paymentMethod === 'CARD' ? 'CARD' : 'BANK_TRANSFER',
-          transactionRef: razorpayTxnId,
-          remarks: `Online payment via ${paymentMethod}`,
-        });
+    try {
+      // 1. Create the order on the server (amount is re-checked against the invoice balance)
+      const orderRes = await api.post('/finance/payments/create-order', {
+        feeInvoiceId: payingInstallment.id,
+        amount: payingInstallment.balanceAmount,
+      });
+      const orderData = orderRes.data?.data;
+      if (!orderData?.orderId || !orderData?.keyId) {
+        throw new Error('Online payments are not available right now. Please pay at the school office.');
       }
+
+      // 2. Razorpay checkout
+      const rzp = await openRazorpayModal({
+        key: orderData.keyId,
+        amount: orderData.amount,
+        currency: 'INR',
+        name: user?.school?.name || 'SchoolHub Fee Portal',
+        description: `Payment for Invoice ${payingInstallment.invoiceNo}`,
+        order_id: orderData.orderId,
+        prefill: { name: user?.name, email: user?.email },
+      });
+
+      // 3. Server verifies the signature and credits the order's amount
+      await api.post('/finance/payments/verify', {
+        feeInvoiceId: payingInstallment.id,
+        amount: payingInstallment.balanceAmount,
+        razorpayOrderId: rzp.razorpay_order_id,
+        razorpayPaymentId: rzp.razorpay_payment_id,
+        razorpaySignature: rzp.razorpay_signature,
+      });
+    } catch (err: any) {
+      setIsProcessingPayment(false);
+      if (err?.message?.includes('cancelled')) return; // user closed the checkout
+      // Never mark an invoice paid locally when the payment didn't go through
+      setPaymentError(
+        err?.response?.data?.message || err?.message || 'Payment could not be completed. You have not been charged.'
+      );
+      return;
     }
 
-    const generatedReceiptNo = `REC-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-    const updated = installments.map((inst) =>
-      inst.id === payingInstallment.id
-        ? {
-            ...inst,
-            status: 'PAID' as const,
-            paidAmount: inst.totalAmount,
-            balanceAmount: 0,
-            paidOn: 'Today, Just now',
-            receiptNo: generatedReceiptNo,
-            paymentMode:
-              paymentMethod === 'UPI'
-                ? `UPI (${upiId || 'GPay'})`
-                : paymentMethod === 'CARD'
-                ? 'Debit Card (RuPay Platinum)'
-                : 'NetBanking (State Bank of India)',
-            transactionRef: razorpayTxnId,
-          }
-        : inst
-    );
-
-    setInstallments(updated);
+    setIsProcessingPayment(false);
+    // Reload invoices/receipts from the server instead of faking a PAID state
+    await queryClient.invalidateQueries({ queryKey: FINANCE_KEYS.all });
     setPaymentSuccess(true);
     confetti({ particleCount: 70, spread: 80, origin: { y: 0.6 } });
 
@@ -549,10 +513,19 @@ export const StudentPersonalFeesView: React.FC<StudentPersonalFeesViewProps> = (
                     </div>
                   )}
 
+                  {paymentError && (
+                    <p role="alert" className="p-3 rounded-xl bg-accent-rose-subtle text-accent-rose text-xs font-semibold">
+                      {paymentError}
+                    </p>
+                  )}
+
                   <div className="pt-2 flex items-center justify-end gap-3 border-t border-border">
                     <button
                       type="button"
-                      onClick={() => setPayingInstallment(null)}
+                      onClick={() => {
+                        setPaymentError(null);
+                        setPayingInstallment(null);
+                      }}
                       className="px-5 py-2.5 rounded-full border border-border text-secondary font-bold text-xs hover:bg-surface-raised cursor-pointer"
                     >
                       Cancel

@@ -16,10 +16,14 @@ export const STUDENT_KEYS = {
   detail: (id: string) => [...STUDENT_KEYS.details(), id] as const,
 };
 
-export const useStudents = (params?: { search?: string; classId?: string; sectionId?: string }) => {
+export const useStudents = (
+  params?: { search?: string; classId?: string; sectionId?: string },
+  enabled = true
+) => {
   return useQuery({
     queryKey: STUDENT_KEYS.list(params),
     queryFn: () => studentService.getStudents(params),
+    enabled,
     staleTime: 1000 * 60 * 5, // 5 minutes fresh
   });
 };

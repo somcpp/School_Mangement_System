@@ -38,6 +38,7 @@ import {
 import { SCHOOL_DAYS, type DayOfWeek, type TimetableEntry, type TimetableFilters } from '../services';
 
 interface PeriodSlot {
+  subjectId: string;
   periodNum: number;
   time: string;
   durationMins: number | null;
@@ -78,6 +79,7 @@ const subjectPrefix = (code: string) => code.toUpperCase().replace(/[-\d\s].*$/,
 const toSlot = (entry: TimetableEntry): PeriodSlot => {
   const duration = toMinutes(entry.endTime) - toMinutes(entry.startTime);
   return {
+    subjectId: entry.subjectId,
     periodNum: entry.periodNumber,
     time: `${formatTime(entry.startTime)} - ${formatTime(entry.endTime)}`,
     durationMins: Number.isFinite(duration) && duration > 0 ? duration : null,
@@ -89,16 +91,6 @@ const toSlot = (entry: TimetableEntry): PeriodSlot => {
   };
 };
 
-/** Maps a subject to the student classroom demo pages (still mock data — see HANDOVER Phase 1). */
-const CLASSROOM_IDS: Record<string, string> = {
-  MATH: 'sub_math',
-  PHY: 'sub_phy',
-  SCI: 'sub_phy',
-  CHEM: 'sub_chem',
-  BIO: 'sub_bio',
-  ENG: 'sub_eng',
-  CS: 'sub_cs',
-};
 
 /** Pastel palette per subject family (light + dark variants). */
 const getPeriodThemeClasses = (subjectCode: string, isLive: boolean) => {
@@ -672,9 +664,9 @@ export const TimetablePage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      const targetId = CLASSROOM_IDS[subjectPrefix(activeSlot.code)];
+                      const targetId = activeSlot.subjectId;
                       setActiveSlot(null);
-                      navigate(targetId ? `/my-subjects/${targetId}` : '/my-subjects');
+                      navigate(`/my-subjects/${targetId}`);
                     }}
                     className="px-6 py-2.5 rounded-full bg-accent-blue text-white font-bold text-xs shadow-card hover:bg-brand-sky-dark transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
                   >

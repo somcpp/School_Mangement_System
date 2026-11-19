@@ -12,7 +12,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useSocket, type ChatMessagePayload } from '../context/SocketContext';
-import { reportService } from '../services/report.service';
 import { PreviewBadge } from '../components/ui/PreviewBadge';
 import confetti from 'canvas-confetti';
 import {
@@ -1009,120 +1008,6 @@ export const MessagesPage: React.FC = () => {
             </button>
           </form>
         </div>
-      </div>
-    </div>
-  );
-};
-
-/* ========================================================================= */
-/* 3. REPORTS & ANALYTICS PAGE                                               */
-/* ========================================================================= */
-
-export const ReportsPage: React.FC = () => {
-  const [downloadingIdx, setDownloadingIdx] = useState<number | null>(null);
-
-  const reportTemplates = [
-    { title: 'Student Academic Performance Ledger', desc: 'Detailed grade breakdown by class, section, term, and subject GPA.', freq: 'Quarterly', type: 'academic' },
-    { title: 'Attendance Analytics & Defaulters', desc: 'Monthly attendance compliance, absenteeism trends, and students below 75% threshold.', freq: 'Monthly', type: 'attendance' },
-    { title: 'Fee Collection & Overdue Ledger', desc: 'Reconciliation of collected fees, concessions, pending dues, and UPI transaction logs.', freq: 'Weekly', type: 'fee' },
-    { title: 'Library Inventory & Circulation Report', desc: 'Catalog volume inventory, active student borrow issues, and overdue returns log.', freq: 'Bi-Weekly', type: 'library' },
-  ];
-
-  const handleExport = async (type: string, index: number, title: string) => {
-    setDownloadingIdx(index);
-    try {
-      let csvContent = '';
-      const filename = `${title.toLowerCase().replace(/[\s&]+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`;
-
-      if (type === 'attendance') {
-        const data = await reportService.getAttendanceReport().catch(() => null);
-        csvContent = 'Attendance Report (CBSE Session 2026-27)\n';
-        csvContent += `Overall School Attendance Rate,${data?.overallPresentPercentage || 92.4}%\n`;
-        csvContent += `Total Records Evaluated,${data?.totalRecords || 420}\n\n`;
-        csvContent += 'Class,Section,Present Count,Absent Count,Attendance Rate\n';
-        if (data?.classBreakdown && data.classBreakdown.length > 0) {
-          data.classBreakdown.forEach((b) => {
-            csvContent += `"${b.className}","${b.sectionName}",${b.presentCount},${b.absentCount},${b.attendanceRate}%\n`;
-          });
-        } else {
-          csvContent += '"Class 10","Section A",38,2,95%\n"Class 10","Section B",36,4,90%\n"Class 9","Section A",40,0,100%\n';
-        }
-      } else if (type === 'fee') {
-        const data = await reportService.getFeeReport().catch(() => null);
-        csvContent = 'Fee Collection & Overdue Ledger (INR)\n';
-        csvContent += `Total Invoiced,INR ${data?.totalInvoiced || 2500000}\n`;
-        csvContent += `Total Collected,INR ${data?.totalCollected || 2150000}\n`;
-        csvContent += `Total Pending,INR ${data?.totalPending || 350000}\n`;
-        csvContent += `Collection Rate,${data?.collectionRate || 86}%\n\n`;
-        csvContent += 'Term,Invoice Count,Total Due (INR),Total Paid (INR),Status\n';
-        csvContent += 'Quarter 1 (Apr-Jun),420,1250000,1200000,96% Collected\nQuarter 2 (Jul-Sep),420,1250000,950000,76% Collected\n';
-      } else if (type === 'library') {
-        csvContent = 'Library Catalog & Issue Report\n';
-        csvContent += `Generated At,${new Date().toLocaleString('en-IN')}\n\n`;
-        csvContent += 'Book Title,Author,Category,Total Copies,Available Copies,Active Loans\n';
-        csvContent += '"Concepts of Physics (Vol 1)","H.C. Verma","Physics",20,14,6\n';
-        csvContent += '"Higher Algebra","Hall & Knight","Mathematics",15,8,7\n';
-        csvContent += '"Organic Chemistry","Morrison & Boyd","Chemistry",10,5,5\n';
-        csvContent += '"To Kill a Mockingbird","Harper Lee","Literature",12,12,0\n';
-      } else {
-        csvContent = `${title}\nExport Date,${new Date().toLocaleDateString('en-IN')}\n\n`;
-        csvContent += 'Metric,Target,Achieved,Status\n';
-        csvContent += 'Curriculum Coverage,100%,88%,On Schedule\nAssessment Timelines,100%,100%,Compliant\nClass Average GPA,8.5,8.2,Satisfactory\n';
-      }
-
-      // Browser trigger download
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch {
-      alert('Unable to generate report at this time.');
-    } finally {
-      setDownloadingIdx(null);
-    }
-  };
-
-  return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-12">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-primary">Analytics &amp; Institutional Reports</h1>
-          <p className="text-sm text-secondary">Generate compliance audit trails, academic score ledgers, and financial exports in CSV/Excel.</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {reportTemplates.map((r, i) => (
-          <div key={i} className="bg-surface rounded-3xl p-6 border border-border shadow-card flex flex-col justify-between">
-            <div>
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-2xl bg-accent-violet-subtle text-accent-violet flex items-center justify-center font-bold">
-                  <FileText className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-sm text-primary">{r.title}</h3>
-                  <span className="text-[10px] font-bold text-muted uppercase tracking-wider">{r.freq}</span>
-                </div>
-              </div>
-              <p className="text-xs text-secondary leading-relaxed">{r.desc}</p>
-            </div>
-            <div className="mt-6 pt-4 border-t border-border flex items-center justify-between gap-3">
-              <span className="text-[11px] text-muted font-medium">CSV Format • UTF-8</span>
-              <button
-                onClick={() => handleExport(r.type, i, r.title)}
-                disabled={downloadingIdx === i}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-accent-blue text-white text-xs font-bold shadow-card hover:bg-brand-sky-dark transition-all disabled:opacity-50 cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>{downloadingIdx === i ? 'Exporting...' : 'Export CSV Report'}</span>
-              </button>
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );

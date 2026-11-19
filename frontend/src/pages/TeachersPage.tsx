@@ -15,68 +15,6 @@ import {
 } from '../components/features/teachers';
 import type { Teacher } from '../types';
 
-const defaultSeedTeachers: Teacher[] = [
-  {
-    id: '1',
-    employeeId: 'TCH-001',
-    name: 'Amit Sharma',
-    designation: 'Senior PGT Mathematics',
-    department: 'Mathematics',
-    email: 'amit.sharma@dpa.edu',
-    phone: '+91 98765 43210',
-    qualification: 'M.Sc. Mathematics, B.Ed',
-    experience: '8 Years',
-    subjects: ['Calculus', 'Linear Algebra', 'Class 10 Math'],
-    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200',
-    status: 'ACTIVE',
-    joiningDate: '15 Jun 2018',
-  },
-  {
-    id: '2',
-    employeeId: 'TCH-002',
-    name: 'Dr. Priya Patel',
-    designation: 'Head of Department - Science',
-    department: 'Science',
-    email: 'priya.patel@dpa.edu',
-    phone: '+91 98765 43211',
-    qualification: 'Ph.D. Physics',
-    experience: '12 Years',
-    subjects: ['Physics (11th & 12th)', 'Thermodynamics', 'Lab 1'],
-    avatarUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=200',
-    status: 'ACTIVE',
-    joiningDate: '01 Aug 2014',
-  },
-  {
-    id: '3',
-    employeeId: 'TCH-003',
-    name: 'Sunita Rao',
-    designation: 'TGT English Literature',
-    department: 'Humanities',
-    email: 'sunita.rao@dpa.edu',
-    phone: '+91 98765 43212',
-    qualification: 'M.A. English, B.Ed',
-    experience: '6 Years',
-    subjects: ['English Literature', 'Grammar', 'Class 9 English'],
-    avatarUrl: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&q=80&w=200',
-    status: 'ACTIVE',
-    joiningDate: '10 Jul 2020',
-  },
-  {
-    id: '4',
-    employeeId: 'TCH-004',
-    name: 'Rajesh Nair',
-    designation: 'Computer Science Instructor',
-    department: 'Computer Science',
-    email: 'rajesh.nair@dpa.edu',
-    phone: '+91 98765 43213',
-    qualification: 'M.Tech CSE',
-    experience: '5 Years',
-    subjects: ['Python Programming', 'Database Systems', 'AI Basics'],
-    avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200',
-    status: 'ON_LEAVE',
-    joiningDate: '12 Jan 2021',
-  },
-];
 
 export const TeachersPage: React.FC = () => {
   const [search, setSearch] = useState('');
@@ -85,11 +23,9 @@ export const TeachersPage: React.FC = () => {
   const [selectedTeacher, setSelectedTeacher] = useState<Teacher | null>(null);
 
   // TanStack Query Hook
-  const { data: serverTeachers = [], isLoading } = useTeachers();
-
-  const teachers = useMemo(() => {
-    return serverTeachers.length > 0 ? serverTeachers : defaultSeedTeachers;
-  }, [serverTeachers]);
+  const teachersQuery = useTeachers();
+  const { isLoading } = teachersQuery;
+  const teachers = useMemo(() => teachersQuery.data ?? [], [teachersQuery.data]);
 
   const filteredTeachers = useMemo(() => {
     return teachers.filter((t) => {
@@ -98,7 +34,11 @@ export const TeachersPage: React.FC = () => {
         t.email.toLowerCase().includes(search.toLowerCase()) ||
         t.employeeId.toLowerCase().includes(search.toLowerCase()) ||
         t.subjects.some((s) => s.toLowerCase().includes(search.toLowerCase()));
-      const matchDept = selectedDept === 'ALL' || t.department === selectedDept;
+      // No department field in the data model: match the filter against assigned subjects
+      const matchDept =
+        selectedDept === 'ALL' ||
+        t.department === selectedDept ||
+        t.subjects.some((s) => s.toLowerCase().includes(selectedDept.toLowerCase()));
       return matchQuery && matchDept;
     });
   }, [teachers, search, selectedDept]);
@@ -136,6 +76,19 @@ export const TeachersPage: React.FC = () => {
         selectedDept={selectedDept}
         onDeptChange={setSelectedDept}
       />
+
+      {teachersQuery.isError && (
+        <div className="p-4 rounded-2xl bg-accent-rose-subtle border border-border text-accent-rose text-xs font-bold flex items-center justify-between gap-3">
+          <span>Could not load the faculty directory.</span>
+          <button
+            type="button"
+            onClick={() => teachersQuery.refetch()}
+            className="px-3 py-1.5 rounded-xl bg-surface border border-border text-primary hover:bg-surface-raised transition-all cursor-pointer active:scale-95"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Teachers Grid */}
       <TeacherGrid

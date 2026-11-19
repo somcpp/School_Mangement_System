@@ -59,7 +59,7 @@ export class FinanceController {
         status,
         search,
         academicYearId,
-      });
+      }, req.user);
 
       const meta = buildPaginationMeta(total, pagination);
       return ApiResponse.success(res, invoices, 'Invoices fetched successfully', 200, meta);
@@ -83,7 +83,7 @@ export class FinanceController {
 
   static async createFeeOrder(req: Request, res: Response, next: NextFunction) {
     try {
-      const order = await FinanceService.createFeeOrder(req.schoolId!, req.body);
+      const order = await FinanceService.createFeeOrder(req.schoolId!, req.body, req.user);
       return ApiResponse.success(res, order, 'Razorpay fee order created successfully');
     } catch (error) {
       next(error);
@@ -95,7 +95,8 @@ export class FinanceController {
       const result = await FinanceService.verifyAndCollectOnlinePayment(
         req.schoolId!,
         req.body,
-        req.user!.userId
+        req.user!.userId,
+        req.user
       );
       return ApiResponse.success(res, result, 'Online payment verified and recorded successfully');
     } catch (error) {

@@ -32,7 +32,7 @@ export class AssignmentsController {
         classId,
         sectionId,
         subjectId,
-      });
+      }, req.user);
       return ApiResponse.success(res, assignments);
     } catch (error) {
       next(error);
@@ -43,7 +43,8 @@ export class AssignmentsController {
     try {
       const assignment = await AssignmentsService.getAssignmentById(
         req.schoolId!,
-        req.params.id
+        req.params.id,
+        req.user
       );
       return ApiResponse.success(res, assignment);
     } catch (error) {

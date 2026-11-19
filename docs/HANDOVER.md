@@ -104,10 +104,24 @@ Add a small "Preview" badge to the headers of **Library**, **Messages** and **Se
 
 ## 3. Deferred — LATER (do NOT start before the presentation)
 
-### Phase 1 — Real data everywhere
-- Student subject/homework pages → `assignmentService` (drop `data/studentSubjectsData.ts`).
-- Move the remaining 15 pages from `useEffect` fetching to React Query hooks in `src/hooks/`, with proper error states.
-- Reports page: real charts from `/reports` endpoints.
+### ✅ Phase 1 — Real data everywhere
+> Done 2026-11-19 on `feat/phase-1-real-data` (branched from `feat/phase-0-demo-polish`, not merged).
+
+- [x] Student subject/homework pages → `assignmentService` (drop `data/studentSubjectsData.ts`). New `GET /academics/my-subjects`; real homework submission; Tests tab from date sheets + report cards. Chapter notes / syllabus progress removed (no backend model — see Phase 3).
+- [x] Move the remaining pages from `useEffect` fetching to React Query hooks in `src/hooks/`, with proper error states (Exams, Super Admin, parent dashboard/attendance/fees, teacher dashboard, calendar). The real count was ~8 files, not 15.
+- [x] Reports page: real charts from `/reports` endpoints (fees + attendance, CSV export, Super Admin school picker).
+- [x] Also removed remaining mock data: Students/Teachers/Notice seed fallbacks, invented fields in the student/teacher mappers, student dashboard, student attendance, admin dashboard chart.
+
+**Security fixes made along the way (also affect `main` / the demo branch — review before merging):**
+- IDOR: `GET /students/:id`, `GET /exams/:id/report-card/:studentId`, `GET /attendance/student/:id`, `GET /assignments/:id` let any student/parent read other students' data; `GET /academics/classes/:id` exposed the roster to students. Now scoped via `students/student-access.ts`.
+- Finance: `POST /finance/payments/collect` was open to students/parents (mark own invoice paid without paying) → admin only. `/payments/verify` trusted the client `amount` (pay ₹1, record ₹10,000) and allowed replay → now uses the Razorpay order amount, checks invoice/school, rejects reused payment ids. `GET /finance/invoices` returned all invoices to students/parents → scoped.
+- Frontend no longer falls back to `/payments/collect` or marks invoices PAID locally when Razorpay fails.
+
+**Known gaps left for later:**
+- Duplicate "Term 1 Tuition & Lab Fee 2026" fee structure (₹0, 0 invoices) exists in the Neon DB from seed runs before the idempotency fix — delete it manually if unwanted.
+- Library, Messages, Settings remain Preview (Phase 3). Leave requests have no backend (form removed).
+- `collectPayment` reads the invoice outside its transaction (concurrent payments could over-collect) — wrap the read in the transaction.
+- Super Admin dashboard, Profile and Settings still contain some hardcoded copy; Notifications provider still polls via `useEffect` (global context, deliberately left).
 
 ### Phase 2 — Cleanup & safety net
 - Split the six 1,000+ line pages into `components/features/<domain>/` sub-components (start with `OtherPages.tsx` → `LibraryPage`, `MessagesPage`, `ReportsPage`, `SettingsPage` as separate files).

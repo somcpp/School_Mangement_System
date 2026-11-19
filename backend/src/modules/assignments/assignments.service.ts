@@ -10,7 +10,8 @@ import {
   SubmitAssignmentInput,
   GradeSubmissionInput,
 } from './assignments.schema.js';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
+import { getAccessibleStudentIds, type Requester } from '../students/student-access.js';
 
 export class AssignmentsService {
   /**
@@ -83,35 +84,64 @@ export class AssignmentsService {
   }
 
   /**
-   * List assignments with filtering
+   * List assignments with filtering (bounded).
+   * Students are always scoped to their active section and only see their own submission.
    */
   static async listAssignments(
     schoolId: string,
-    filters: { classId?: string; sectionId?: string; subjectId?: string }
+    filters: { classId?: string; sectionId?: string; subjectId?: string },
+    requester?: Requester
   ) {
     const where: Prisma.AssignmentWhereInput = { schoolId };
+    let ownStudentId: string | null = null;
 
-    if (filters.classId) where.classId = filters.classId;
-    if (filters.sectionId) where.sectionId = filters.sectionId;
+    if (requester?.role === UserRole.STUDENT) {
+      const student = await prisma.student.findFirst({
+        where: { schoolId, userId: requester.userId },
+        select: {
+          id: true,
+          enrollments: {
+            where: { status: 'ACTIVE' },
+            select: { classId: true, sectionId: true },
+            take: 1,
+          },
+        },
+      });
+      const enrollment = student?.enrollments[0];
+      if (!student || !enrollment) return [];
+      ownStudentId = student.id;
+      where.classId = enrollment.classId;
+      where.sectionId = enrollment.sectionId;
+    } else {
+      if (filters.classId) where.classId = filters.classId;
+      if (filters.sectionId) where.sectionId = filters.sectionId;
+    }
     if (filters.subjectId) where.subjectId = filters.subjectId;
 
     return prisma.assignment.findMany({
       where,
       orderBy: { dueDate: 'desc' },
+      take: 100,
       include: {
         class: { select: { id: true, name: true } },
         section: { select: { id: true, name: true } },
         subject: { select: { id: true, name: true, code: true } },
         teacher: { include: { user: { select: { name: true } } } },
         _count: { select: { submissions: true } },
+        ...(ownStudentId
+          ? { submissions: { where: { studentId: ownStudentId }, take: 1 } }
+          : {}),
       },
     });
   }
 
   /**
-   * Get assignment detail with submission list
+   * Get assignment detail with submission list.
+   * Students/parents only receive their own (or their children's) submissions.
    */
-  static async getAssignmentById(schoolId: string, assignmentId: string) {
+  static async getAssignmentById(schoolId: string, assignmentId: string, requester?: Requester) {
+    const visibleStudentIds = await getAccessibleStudentIds(schoolId, requester);
+
     const assignment = await prisma.assignment.findFirst({
       where: { id: assignmentId, schoolId },
       include: {
@@ -120,6 +150,7 @@ export class AssignmentsService {
         subject: true,
         teacher: { include: { user: { select: { name: true, email: true } } } },
         submissions: {
+          where: visibleStudentIds ? { studentId: { in: visibleStudentIds } } : undefined,
           include: {
             student: {
               select: {
@@ -131,6 +162,7 @@ export class AssignmentsService {
             },
           },
           orderBy: { submittedAt: 'desc' },
+          take: 200,
         },
       },
     });

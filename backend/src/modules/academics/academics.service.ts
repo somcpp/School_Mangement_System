@@ -365,4 +365,102 @@ export class AcademicsService {
       };
     });
   }
+
+  /**
+   * Subjects for the signed-in student's active section: teacher, weekly period count and rooms.
+   * Deliberately avoids the class roster so students never receive classmates' records.
+   */
+  static async getStudentSubjects(schoolId: string, userId: string) {
+    const student = await prisma.student.findFirst({
+      where: { schoolId, userId },
+      select: {
+        id: true,
+        enrollments: {
+          where: { status: 'ACTIVE' },
+          take: 1,
+          select: {
+            classId: true,
+            sectionId: true,
+            rollNumber: true,
+            class: { select: { name: true } },
+            section: { select: { name: true, roomNumber: true } },
+          },
+        },
+      },
+    });
+    if (!student) throw AppError.notFound('Student profile not found');
+
+    const enrollment = student.enrollments[0];
+    if (!enrollment) return { studentId: student.id, enrollment: null, subjects: [] };
+
+    const teacherSelect = {
+      id: true,
+      designation: true,
+      user: { select: { name: true, email: true } },
+    } as const;
+
+    const [classSubjects, periods] = await Promise.all([
+      prisma.classSubject.findMany({
+        where: { schoolId, classId: enrollment.classId },
+        include: { subject: true, teacher: { select: teacherSelect } },
+        take: 50,
+      }),
+      prisma.timetable.findMany({
+        where: { schoolId, sectionId: enrollment.sectionId },
+        select: { subjectId: true, roomNumber: true, subject: true, teacher: { select: teacherSelect } },
+        take: 200,
+      }),
+    ]);
+
+    type TeacherInfo = (typeof classSubjects)[number]['teacher'];
+    const bySubject = new Map<
+      string,
+      { subject: (typeof classSubjects)[number]['subject']; teacher: TeacherInfo; weeklyPeriods: number; rooms: Set<string> }
+    >();
+
+    for (const cs of classSubjects) {
+      bySubject.set(cs.subjectId, { subject: cs.subject, teacher: cs.teacher, weeklyPeriods: 0, rooms: new Set() });
+    }
+    for (const p of periods) {
+      const entry =
+        bySubject.get(p.subjectId) ??
+        { subject: p.subject, teacher: p.teacher, weeklyPeriods: 0, rooms: new Set<string>() };
+      entry.weeklyPeriods += 1;
+      if (p.roomNumber) entry.rooms.add(p.roomNumber);
+      if (!entry.teacher && p.teacher) entry.teacher = p.teacher;
+      bySubject.set(p.subjectId, entry);
+    }
+
+    const subjects = [...bySubject.values()]
+      .map(({ subject, teacher, weeklyPeriods, rooms }) => ({
+        id: subject.id,
+        name: subject.name,
+        code: subject.code,
+        type: subject.type,
+        weeklyPeriods,
+        rooms: [...rooms],
+        teacher: teacher
+          ? {
+              id: teacher.id,
+              name: teacher.user.name,
+              email: teacher.user.email,
+              designation: teacher.designation,
+            }
+          : null,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      studentId: student.id,
+      enrollment: {
+        classId: enrollment.classId,
+        sectionId: enrollment.sectionId,
+        className: enrollment.class.name,
+        sectionName: enrollment.section.name,
+        homeRoom: enrollment.section.roomNumber,
+        rollNumber: enrollment.rollNumber,
+      },
+      subjects,
+    };
+  }
 }

@@ -46,6 +46,15 @@ export class AcademicsController {
     }
   }
 
+  static async getMySubjects(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await AcademicsService.getStudentSubjects(req.schoolId!, req.user!.userId);
+      return ApiResponse.success(res, data);
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async getClassById(req: Request, res: Response, next: NextFunction) {
     try {
       const cls = await AcademicsService.getClassById(req.schoolId!, req.params.id);

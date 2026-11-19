@@ -845,6 +845,118 @@ async function main() {
     console.log('ℹ️  Timetable for Class 10-A already exists, skipping');
   }
 
+  // 16. Seed Homework Assignments for Class 10-A (dates relative to seeding day)
+  const daysFromNow = (days: number) => {
+    const d = new Date();
+    d.setHours(23, 59, 0, 0);
+    d.setDate(d.getDate() + days);
+    return d;
+  };
+
+  const assignmentPlan = [
+    {
+      title: 'Quadratic Equations – Exercise 4.3',
+      description: 'Solve questions 1–8 of NCERT Exercise 4.3 using the quadratic formula. Show the discriminant for each.',
+      subject: mathSubject,
+      teacher: teacher,
+      dueInDays: 5,
+      maxMarks: 20,
+      submission: null,
+    },
+    {
+      title: "Ohm's Law Lab Report",
+      description: 'Write up the V–I readings from Tuesday\'s lab, plot the graph and state your conclusion about resistance.',
+      subject: scienceSubject,
+      teacher: scienceTeacher,
+      dueInDays: 2,
+      maxMarks: 25,
+      submission: null,
+    },
+    {
+      title: 'Python Loops Worksheet',
+      description: 'Complete the 10 for/while loop exercises from the worksheet and paste your code with outputs.',
+      subject: computerSubject,
+      teacher: scienceTeacher,
+      dueInDays: 9,
+      maxMarks: 20,
+      submission: null,
+    },
+    {
+      title: 'Letter to the Editor',
+      description: 'Write a formal letter (150–200 words) to the editor of a newspaper about plastic waste in your locality.',
+      subject: englishSubject,
+      teacher: englishTeacher,
+      dueInDays: -7,
+      maxMarks: 20,
+      submission: {
+        content: 'Submitted my letter on plastic waste near Sunshine Heights market.',
+        marksObtained: 18,
+        feedback: 'Excellent format and a persuasive tone. Watch your paragraph transitions.',
+        status: 'GRADED',
+      },
+    },
+    {
+      title: 'Map Work: Resources & Development',
+      description: 'Mark the major soil types and two multipurpose river projects on the outline map of India.',
+      subject: sstSubject,
+      teacher: englishTeacher,
+      dueInDays: -3,
+      maxMarks: 10,
+      submission: {
+        content: 'Map completed — soil regions shaded and Bhakra Nangal and Hirakud marked.',
+        marksObtained: null,
+        feedback: null,
+        status: 'SUBMITTED',
+      },
+    },
+  ];
+
+  let seededAssignments = 0;
+  for (const plan of assignmentPlan) {
+    const existing = await prisma.assignment.findFirst({
+      where: { schoolId: school.id, sectionId: sectionA.id, title: plan.title },
+      select: { id: true },
+    });
+    if (existing) continue;
+
+    const created = await prisma.assignment.create({
+      data: {
+        schoolId: school.id,
+        academicYearId: academicYear.id,
+        classId: class10.id,
+        sectionId: sectionA.id,
+        subjectId: plan.subject.id,
+        teacherId: plan.teacher.id,
+        title: plan.title,
+        description: plan.description,
+        dueDate: daysFromNow(plan.dueInDays),
+        maxMarks: plan.maxMarks,
+        status: 'PUBLISHED',
+      },
+    });
+    seededAssignments += 1;
+
+    if (plan.submission) {
+      await prisma.assignmentSubmission.create({
+        data: {
+          assignmentId: created.id,
+          studentId: student.id,
+          content: plan.submission.content,
+          submittedAt: daysFromNow(plan.dueInDays - 1),
+          status: plan.submission.status,
+          marksObtained: plan.submission.marksObtained,
+          feedback: plan.submission.feedback,
+          gradedAt: plan.submission.status === 'GRADED' ? daysFromNow(plan.dueInDays + 2) : null,
+        },
+      });
+    }
+  }
+  console.log(
+    seededAssignments
+      ? `✅ Seeded ${seededAssignments} homework assignments for Class 10-A`
+      : 'ℹ️  Homework assignments for Class 10-A already exist, skipping',
+  );
+
   console.log('\n🎉 Database Seeding Completed Successfully!\n');
   console.log('====================================================');
   console.log('🔑 TEST LOGIN CREDENTIALS:');

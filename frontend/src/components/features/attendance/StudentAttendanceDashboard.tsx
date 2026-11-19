@@ -1,349 +1,231 @@
 /**
  * @file StudentAttendanceDashboard.tsx
- * @description Student and Parent personal attendance dashboard with CBSE >75% compliance meter.
+ * @description Student's own attendance from GET /attendance/student/:id: CBSE 75% compliance
+ * meter, summary counts and a month-by-month history of the actual roll-call records.
  */
 
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import confetti from 'canvas-confetti';
-import {
-  ShieldCheck,
-  GraduationCap,
-  FileText,
-  Calendar,
-  X,
-  Upload,
-  Send,
-  CheckCircle2,
-} from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+import { AlertCircle, CalendarX2, ChevronLeft, ChevronRight, GraduationCap, RefreshCw, ShieldCheck } from 'lucide-react';
 import { useStudentAttendance } from '../../../hooks';
-import type { AttendanceStatus } from '../../../types';
 
 interface StudentAttendanceDashboardProps {
   user: any;
 }
 
-interface DailyAttendanceRecord {
-  date: string;
-  day: string;
-  status: AttendanceStatus | 'HOLIDAY';
-  punchTime?: string;
-  reason?: string;
-}
+const MINIMUM = 75;
 
-const studentAprilRecords: DailyAttendanceRecord[] = [
-  { date: '01 Apr', day: 'Wed', status: 'PRESENT', punchTime: '08:15 AM' },
-  { date: '02 Apr', day: 'Thu', status: 'PRESENT', punchTime: '08:18 AM' },
-  { date: '03 Apr', day: 'Fri', status: 'PRESENT', punchTime: '08:12 AM' },
-  { date: '04 Apr', day: 'Sat', status: 'PRESENT', punchTime: '08:25 AM' },
-  { date: '05 Apr', day: 'Sun', status: 'HOLIDAY', reason: 'Sunday' },
-  { date: '06 Apr', day: 'Mon', status: 'PRESENT', punchTime: '08:14 AM' },
-  { date: '07 Apr', day: 'Tue', status: 'PRESENT', punchTime: '08:20 AM' },
-  { date: '08 Apr', day: 'Wed', status: 'ABSENT', reason: 'Sick Leave (Approved by Amit Sir)' },
-  { date: '09 Apr', day: 'Thu', status: 'ABSENT', reason: 'High viral fever (Medical certificate on file)' },
-  { date: '10 Apr', day: 'Fri', status: 'PRESENT', punchTime: '08:19 AM' },
-  { date: '11 Apr', day: 'Sat', status: 'PRESENT', punchTime: '08:22 AM' },
-  { date: '12 Apr', day: 'Sun', status: 'HOLIDAY', reason: 'Sunday' },
-  { date: '13 Apr', day: 'Mon', status: 'HOLIDAY', reason: 'Baisakhi / Ambedkar Jayanti' },
-  { date: '14 Apr', day: 'Tue', status: 'LATE', punchTime: '08:44 AM', reason: 'Bus route #12 tyre puncture' },
-  { date: '15 Apr', day: 'Wed', status: 'PRESENT', punchTime: '08:10 AM' },
-  { date: '16 Apr', day: 'Thu', status: 'PRESENT', punchTime: '08:16 AM' },
-  { date: '17 Apr', day: 'Fri', status: 'PRESENT', punchTime: '08:21 AM' },
-  { date: '18 Apr', day: 'Sat', status: 'PRESENT', punchTime: '08:15 AM' },
-  { date: '19 Apr', day: 'Sun', status: 'HOLIDAY', reason: 'Sunday' },
-  { date: '20 Apr', day: 'Mon', status: 'PRESENT', punchTime: '08:12 AM' },
-  { date: '21 Apr', day: 'Tue', status: 'PRESENT', punchTime: '08:15 AM' },
-];
+const STATUS_STYLES: Record<string, string> = {
+  PRESENT:
+    'bg-emerald-50/70 border-emerald-200 text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-800/60 dark:text-emerald-200',
+  ABSENT: 'bg-rose-50/70 border-rose-200 text-rose-900 dark:bg-rose-950/30 dark:border-rose-800/60 dark:text-rose-200',
+  LATE: 'bg-amber-50/70 border-amber-200 text-amber-900 dark:bg-amber-950/30 dark:border-amber-800/60 dark:text-amber-200',
+};
+const STATUS_DOT: Record<string, string> = { PRESENT: 'bg-emerald-500', ABSENT: 'bg-rose-500', LATE: 'bg-amber-500' };
+
+const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
 export const StudentAttendanceDashboard: React.FC<StudentAttendanceDashboardProps> = ({ user }) => {
-  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
-  const [leaveType, setLeaveType] = useState('MEDICAL');
-  const [leaveStartDate, setLeaveStartDate] = useState('');
-  const [leaveEndDate, setLeaveEndDate] = useState('');
-  const [leaveReason, setLeaveReason] = useState('');
-  const [leaveSubmitted, setLeaveSubmitted] = useState(false);
-  const [selectedMonth] = useState('April 2026');
+  const studentId: string = user?.studentProfile?.id ?? '';
+  const enrollment = user?.studentProfile?.enrollments?.[0];
+  const query = useStudentAttendance(studentId);
+  const summary = query.data?.summary;
+  const totalDays = summary?.totalDays ?? 0;
+  const hasRecords = totalDays > 0;
+  const percentage = hasRecords ? summary!.percentage : 0;
+  const safe = percentage >= MINIMUM;
 
-  const studentId = user?.studentProfile?.id;
-  const { data: attendanceData } = useStudentAttendance(studentId);
+  // Group the real records by month, newest month first
+  const months = useMemo(() => {
+    const map = new Map<string, Array<{ id: string; date: Date; status: string; reason?: string | null }>>();
+    for (const r of query.data?.records ?? []) {
+      const date = new Date(r.date);
+      if (Number.isNaN(date.getTime())) continue;
+      const key = monthKey(date);
+      map.set(key, [...(map.get(key) ?? []), { id: r.id, date, status: r.status, reason: r.reason }]);
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => (a < b ? 1 : -1))
+      .map(([key, recs]) => ({ key, records: recs.sort((x, y) => x.date.getTime() - y.date.getTime()) }));
+  }, [query.data]);
 
-  const totalWorkingDays = attendanceData?.summary?.totalDays || 130;
-  const daysAttended = attendanceData?.summary?.presentDays || 115;
-  const daysAbsent = attendanceData?.summary?.absentDays || 11;
-  const daysLate = attendanceData?.summary?.lateDays || 4;
-  const attendancePercentage = ((daysAttended / (totalWorkingDays || 1)) * 100).toFixed(1);
-
-  const handleApplyLeave = (e: React.FormEvent) => {
-    e.preventDefault();
-    setLeaveSubmitted(true);
-    confetti({ particleCount: 50, spread: 60, origin: { y: 0.6 } });
-    setTimeout(() => {
-      setLeaveSubmitted(false);
-      setIsLeaveModalOpen(false);
-      setLeaveReason('');
-      setLeaveStartDate('');
-      setLeaveEndDate('');
-    }, 2000);
-  };
+  const [monthIndex, setMonthIndex] = useState(0);
+  const month = months[Math.min(monthIndex, Math.max(0, months.length - 1))];
+  const monthLabel = month
+    ? new Date(`${month.key}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+    : '';
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
-      {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-primary flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-primary flex items-center gap-2 flex-wrap">
             <span>My Attendance Record</span>
-            <span className="px-3 py-1 rounded-full text-xs font-bold bg-accent-blue-subtle text-accent-blue">
-              Class 10 - Section A
-            </span>
+            {enrollment?.class?.name && (
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-accent-blue-subtle text-accent-blue">
+                {enrollment.class.name} - Section {enrollment.section?.name}
+              </span>
+            )}
           </h1>
           <p className="text-xs text-secondary mt-1">
-            Review your official school attendance, CBSE compliance percentage, and view teacher verified absence logs.
+            Your official roll-call record and CBSE {MINIMUM}% attendance compliance. Absences are recorded by your class teacher.
           </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setIsLeaveModalOpen(true)}
-          className="px-5 py-2.5 rounded-2xl bg-accent-blue text-white font-bold text-xs shadow-card hover:bg-brand-sky-dark transition-all flex items-center gap-2 cursor-pointer active:scale-95 self-start sm:self-auto"
-        >
-          <FileText className="w-4 h-4" />
-          <span>Apply for Leave / Absence Slip</span>
-        </button>
-      </div>
-
-      {/* Hero Banner: CBSE >75% Mandatory Attendance Compliance Card */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-3xl bg-gradient-to-r from-[#0284C7] via-[#0EA5E9] to-[#38BDF8] p-8 text-white shadow-card relative overflow-hidden flex flex-col md:flex-row items-start md:items-center justify-between gap-6"
-      >
-        <div className="relative z-10 space-y-3 max-w-xl">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface/20 backdrop-blur-md text-xs font-semibold text-sky-100">
-            <ShieldCheck className="w-4 h-4 text-accent-amber" />
-            <span>CBSE Norm Compliance Meter</span>
-          </div>
-
-          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
-            {attendancePercentage}% Academic Attendance
-          </h2>
-
-          <p className="text-xs sm:text-sm text-sky-100 font-medium leading-relaxed">
-            Eligible for CBSE Board Examinations. You have attended <strong className="text-white">{daysAttended}</strong> out of <strong className="text-white">{totalWorkingDays}</strong> official working days this term.
-          </p>
-
-          <div className="space-y-1.5 pt-2 max-w-md">
-            <div className="flex justify-between text-xs font-bold text-sky-100">
-              <span>Required: 75% CBSE Norm</span>
-              <span className="text-white font-extrabold">{attendancePercentage}% Current (Safe)</span>
-            </div>
-            <div className="w-full h-3 rounded-full bg-surface/20 overflow-hidden relative">
-              <div className="absolute top-0 bottom-0 left-[75%] w-0.5 bg-accent-amber z-10"></div>
-              <div
-                className="h-full rounded-full bg-emerald-400 transition-all duration-700"
-                style={{ width: `${attendancePercentage}%` }}
-              ></div>
-            </div>
-          </div>
-        </div>
-
-        <div className="relative z-10 w-36 h-36 rounded-3xl bg-surface/15 backdrop-blur-md border border-white/25 flex flex-col items-center justify-center text-center p-3 shrink-0">
-          <GraduationCap className="w-9 h-9 text-accent-amber mb-1" />
-          <span className="text-2xl font-extrabold">{daysAttended} / {totalWorkingDays}</span>
-          <span className="text-[10px] text-sky-100 font-bold uppercase tracking-wider mt-0.5">
-            Days Attended
-          </span>
-        </div>
-      </motion.div>
-
-      {/* 4 Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-surface rounded-3xl p-5 border border-border shadow-card">
-          <span className="text-[11px] font-bold text-muted uppercase tracking-wider">Total Working Days</span>
-          <h3 className="text-3xl font-extrabold text-primary mt-2">{totalWorkingDays} Days</h3>
-          <p className="text-xs text-muted mt-1">Term 1 (April – October)</p>
-        </div>
-
-        <div className="bg-surface rounded-3xl p-5 border border-border shadow-card">
-          <span className="text-[11px] font-bold text-muted uppercase tracking-wider">Days Present</span>
-          <h3 className="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-2">{daysAttended} Days</h3>
-          <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium mt-1">Verified roll calls</p>
-        </div>
-
-        <div className="bg-surface rounded-3xl p-5 border border-border shadow-card">
-          <span className="text-[11px] font-bold text-muted uppercase tracking-wider">Days Absent</span>
-          <h3 className="text-3xl font-extrabold text-rose-600 dark:text-rose-400 mt-2">{daysAbsent} Days</h3>
-          <p className="text-xs text-muted mt-1">Medical leaves &amp; excused</p>
-        </div>
-
-        <div className="bg-surface rounded-3xl p-5 border border-border shadow-card">
-          <span className="text-[11px] font-bold text-muted uppercase tracking-wider">Late Arrivals</span>
-          <h3 className="text-3xl font-extrabold text-amber-600 dark:text-amber-400 mt-2">{daysLate} Days</h3>
-          <p className="text-xs text-muted mt-1">Bus delay recorded</p>
         </div>
       </div>
 
-      {/* Monthly Attendance Grid */}
-      <div className="bg-surface rounded-3xl p-6 border border-border shadow-card space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border">
-          <div>
-            <h3 className="text-base font-bold text-primary">Monthly Attendance History ({selectedMonth})</h3>
-            <p className="text-xs text-secondary">Day-by-day punch record taken during 1st period roll call.</p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-secondary">
-            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-emerald-500"></span> Present</span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-rose-500"></span> Absent</span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-amber-500"></span> Late</span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-slate-300 dark:bg-slate-600"></span> Holiday</span>
+      {query.isLoading ? (
+        <div className="space-y-6" aria-busy="true">
+          <div className="h-52 rounded-3xl bg-surface-raised animate-pulse" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-28 rounded-3xl bg-surface-raised animate-pulse" />
+            ))}
           </div>
         </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3">
-          {studentAprilRecords.map((rec) => {
-            const isPresent = rec.status === 'PRESENT';
-            const isAbsent = rec.status === 'ABSENT';
-            const isLate = rec.status === 'LATE';
-
-            return (
-              <div
-                key={rec.date}
-                className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between min-h-[90px] ${
-                  isPresent
-                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-800/60 dark:text-emerald-200'
-                    : isAbsent
-                    ? 'bg-rose-50/70 border-rose-200 text-rose-900 dark:bg-rose-950/30 dark:border-rose-800/60 dark:text-rose-200'
-                    : isLate
-                    ? 'bg-amber-50/70 border-amber-200 text-amber-900 dark:bg-amber-950/30 dark:border-amber-800/60 dark:text-amber-200'
-                    : 'bg-surface-raised border-border text-secondary dark:bg-slate-800/50 dark:border-slate-700/60 dark:text-slate-200'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-primary">{rec.date}</span>
-                  <span className="text-[10px] uppercase font-bold text-muted">{rec.day}</span>
-                </div>
-
-                <div className="mt-2">
-                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-surface-raised">
-                    {rec.status}
+      ) : query.isError ? (
+        <div className="bg-surface rounded-3xl p-10 border border-border shadow-card text-center">
+          <AlertCircle className="w-10 h-10 mx-auto mb-3 text-rose-500" />
+          <h3 className="text-base font-bold text-primary">Could not load your attendance</h3>
+          <button
+            type="button"
+            onClick={() => query.refetch()}
+            className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-accent-blue text-white font-bold text-xs shadow-md hover:bg-brand-sky-dark transition-all cursor-pointer active:scale-95"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Retry
+          </button>
+        </div>
+      ) : !hasRecords ? (
+        <div className="bg-surface rounded-3xl p-10 border border-border shadow-card text-center">
+          <CalendarX2 className="w-10 h-10 mx-auto mb-3 text-muted" />
+          <h3 className="text-base font-bold text-primary">No attendance recorded yet</h3>
+          <p className="text-sm text-secondary mt-1">Your record will appear here once your class teacher marks the roll call.</p>
+        </div>
+      ) : (
+        <>
+          {/* Compliance meter */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-3xl bg-gradient-to-r from-[#0284C7] via-[#0EA5E9] to-[#38BDF8] p-8 text-white shadow-card relative overflow-hidden flex flex-col md:flex-row items-start md:items-center justify-between gap-6"
+          >
+            <div className="relative z-10 space-y-3 max-w-xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-xs font-semibold text-sky-50">
+                <ShieldCheck className="w-4 h-4 text-amber-200" />
+                <span>CBSE Norm Compliance Meter</span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">{percentage}% Attendance</h2>
+              <p className="text-xs sm:text-sm text-sky-50 font-medium leading-relaxed">
+                {safe ? 'Meets' : 'Below'} the CBSE {MINIMUM}% requirement. You attended{' '}
+                <strong className="text-white">{summary!.presentDays}</strong> of{' '}
+                <strong className="text-white">{totalDays}</strong> recorded school days.
+              </p>
+              <div className="space-y-1.5 pt-2 max-w-md">
+                <div className="flex justify-between text-xs font-bold text-sky-50">
+                  <span>Required: {MINIMUM}%</span>
+                  <span className="text-white font-extrabold">
+                    {percentage}% {safe ? '(Safe)' : '(Shortage)'}
                   </span>
-                  {rec.punchTime && <span className="text-[10px] block mt-1 opacity-80">{rec.punchTime}</span>}
+                </div>
+                <div className="w-full h-3 rounded-full bg-white/20 overflow-hidden relative">
+                  <div className="absolute top-0 bottom-0 left-[75%] w-0.5 bg-amber-200 z-10" />
+                  <div
+                    className={`h-full rounded-full transition-all duration-700 ${safe ? 'bg-emerald-300' : 'bg-rose-300'}`}
+                    style={{ width: `${Math.min(100, percentage)}%` }}
+                  />
                 </div>
               </div>
-            );
-          })}
-        </div>
-      </div>
+            </div>
+            <div className="relative z-10 w-36 h-36 rounded-3xl bg-white/15 backdrop-blur-md border border-white/25 flex flex-col items-center justify-center text-center p-3 shrink-0">
+              <GraduationCap className="w-9 h-9 text-amber-200 mb-1" />
+              <span className="text-2xl font-extrabold">
+                {summary!.presentDays} / {totalDays}
+              </span>
+              <span className="text-[10px] text-sky-50 font-bold uppercase tracking-wider mt-0.5">Days Attended</span>
+            </div>
+          </motion.div>
 
-      {/* Leave Application Modal */}
-      <AnimatePresence>
-        {isLeaveModalOpen && (
-          <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-            <motion.div
-              initial={{ scale: 0.98, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.98, opacity: 0 }}
-              className="bg-surface rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-border space-y-5"
-            >
-              <div className="flex items-center justify-between pb-3 border-b border-border">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-2xl bg-accent-blue-subtle text-accent-blue flex items-center justify-center font-bold">
-                    <FileText className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-primary">Apply for Leave / Absence Slip</h3>
-                    <p className="text-xs text-secondary">Submit absence request to Class Teacher Amit Sharma</p>
-                  </div>
+          {/* Summary */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              { label: 'Recorded Days', value: totalDays, tone: 'text-primary', hint: 'Roll calls taken so far' },
+              { label: 'Days Present', value: summary!.presentDays, tone: 'text-emerald-600 dark:text-emerald-400', hint: 'Marked present' },
+              { label: 'Days Absent', value: summary!.absentDays, tone: 'text-rose-600 dark:text-rose-400', hint: 'Marked absent' },
+              { label: 'Late Arrivals', value: summary!.lateDays, tone: 'text-amber-600 dark:text-amber-400', hint: 'Marked late' },
+            ].map((c) => (
+              <div key={c.label} className="bg-surface rounded-3xl p-5 border border-border shadow-card">
+                <span className="text-[11px] font-bold text-muted uppercase tracking-wider">{c.label}</span>
+                <h3 className={`text-3xl font-extrabold mt-2 ${c.tone}`}>
+                  {c.value} Day{c.value === 1 ? '' : 's'}
+                </h3>
+                <p className="text-xs text-muted mt-1">{c.hint}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Monthly history */}
+          <div className="bg-surface rounded-3xl p-6 border border-border shadow-card space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-label="Previous month"
+                  disabled={monthIndex >= months.length - 1}
+                  onClick={() => setMonthIndex((i) => i + 1)}
+                  className="p-2 rounded-xl bg-surface-raised text-secondary hover:bg-accent-blue-subtle transition-all disabled:opacity-40 cursor-pointer"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <div>
+                  <h3 className="text-base font-bold text-primary">Attendance History — {monthLabel}</h3>
+                  <p className="text-xs text-secondary">Days with a recorded roll call</p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsLeaveModalOpen(false)}
-                  className="p-2 rounded-xl hover:bg-surface-raised text-muted cursor-pointer"
+                  aria-label="Next month"
+                  disabled={monthIndex === 0}
+                  onClick={() => setMonthIndex((i) => Math.max(0, i - 1))}
+                  className="p-2 rounded-xl bg-surface-raised text-secondary hover:bg-accent-blue-subtle transition-all disabled:opacity-40 cursor-pointer"
                 >
-                  <X className="w-5 h-5" />
+                  <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
+              <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-secondary">
+                {Object.entries(STATUS_DOT).map(([status, dot]) => (
+                  <span key={status} className="flex items-center gap-1.5">
+                    <span className={`w-3 h-3 rounded-full ${dot}`} /> {status.charAt(0) + status.slice(1).toLowerCase()}
+                  </span>
+                ))}
+              </div>
+            </div>
 
-              {leaveSubmitted ? (
-                <div className="py-8 text-center space-y-2">
-                  <div className="w-14 h-14 rounded-full bg-accent-green-subtle text-accent-green flex items-center justify-center mx-auto">
-                    <CheckCircle2 className="w-8 h-8" />
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3">
+              {(month?.records ?? []).map((rec) => (
+                <div
+                  key={rec.id}
+                  className={`p-3.5 rounded-2xl border flex flex-col justify-between min-h-[90px] ${
+                    STATUS_STYLES[rec.status] ?? 'bg-surface-raised border-border text-secondary'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-extrabold text-primary">
+                      {rec.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                    </span>
+                    <span className="text-[10px] uppercase font-bold text-muted">
+                      {rec.date.toLocaleDateString('en-IN', { weekday: 'short' })}
+                    </span>
                   </div>
-                  <h4 className="text-base font-bold text-primary">Leave Application Transmitted!</h4>
-                  <p className="text-xs text-secondary">Forwarded to Class Teacher and Principal desk.</p>
+                  <div className="mt-2">
+                    <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-surface-raised">
+                      {rec.status.replaceAll('_', ' ')}
+                    </span>
+                    {rec.reason && <span className="text-[10px] block mt-1 opacity-80">{rec.reason}</span>}
+                  </div>
                 </div>
-              ) : (
-                <form onSubmit={handleApplyLeave} className="space-y-4 text-xs">
-                  <div className="space-y-1">
-                    <label className="font-bold text-secondary block">Leave Category</label>
-                    <select
-                      value={leaveType}
-                      onChange={(e) => setLeaveType(e.target.value)}
-                      className="w-full p-2.5 rounded-xl bg-surface-raised border border-border text-xs focus:outline-none"
-                    >
-                      <option value="MEDICAL">Medical Leave (Fever / Doctor Appointment)</option>
-                      <option value="CASUAL">Personal / Family Function</option>
-                      <option value="EMERGENCY">Urgent Domestic Emergency</option>
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="font-bold text-secondary block">Start Date</label>
-                      <input
-                        type="date"
-                        required
-                        value={leaveStartDate}
-                        onChange={(e) => setLeaveStartDate(e.target.value)}
-                        className="w-full p-2.5 rounded-xl bg-surface-raised border border-border text-xs focus:outline-none"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="font-bold text-secondary block">End Date</label>
-                      <input
-                        type="date"
-                        required
-                        value={leaveEndDate}
-                        onChange={(e) => setLeaveEndDate(e.target.value)}
-                        className="w-full p-2.5 rounded-xl bg-surface-raised border border-border text-xs focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="font-bold text-secondary block">Detailed Reason</label>
-                    <textarea
-                      required
-                      rows={3}
-                      value={leaveReason}
-                      onChange={(e) => setLeaveReason(e.target.value)}
-                      placeholder="Explain the reason for absence..."
-                      className="w-full p-2.5 rounded-xl bg-surface-raised border border-border text-xs focus:outline-none resize-none"
-                    />
-                  </div>
-
-                  <div className="pt-2 flex items-center justify-end gap-3 border-t border-border">
-                    <button
-                      type="button"
-                      onClick={() => setIsLeaveModalOpen(false)}
-                      className="px-5 py-2.5 rounded-full border border-border text-secondary font-bold text-xs hover:bg-surface-raised cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-6 py-2.5 rounded-full bg-accent-blue text-white font-bold text-xs shadow-glow-sky hover:bg-brand-sky-dark transition-all flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Transmit Application</span>
-                    </button>
-                  </div>
-                </form>
-              )}
-            </motion.div>
+              ))}
+            </div>
           </div>
-        )}
-      </AnimatePresence>
+        </>
+      )}
     </div>
   );
 };

@@ -16,6 +16,7 @@ export class ReportsService {
   ) {
     const start = new Date(filters.startDate);
     const end = new Date(filters.endDate);
+    end.setHours(23, 59, 59, 999); // include the whole end day
 
     const students = await prisma.student.findMany({
       where: {
@@ -37,6 +38,8 @@ export class ReportsService {
           },
         },
       },
+      orderBy: { firstName: 'asc' },
+      take: 100, // one class/section per report
     });
 
     let overallDays = 0;

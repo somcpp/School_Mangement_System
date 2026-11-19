@@ -118,6 +118,7 @@ export class TeachersService {
       employeeId: t.employeeId,
       name: t.user.name,
       email: t.user.email,
+      avatarUrl: t.user.avatarUrl,
       phone: t.phone,
       gender: t.gender,
       designation: t.designation || 'Teacher',
@@ -127,6 +128,7 @@ export class TeachersService {
         class: cs.class.name,
         subject: cs.subject.name,
       })),
+      joiningDate: t.joiningDate,
       createdAt: t.createdAt,
     }));
 

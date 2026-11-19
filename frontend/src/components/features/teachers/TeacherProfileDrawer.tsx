@@ -43,11 +43,17 @@ export const TeacherProfileDrawer: React.FC<TeacherProfileDrawerProps> = ({
 
             {/* Profile Card */}
             <div className="pt-6 pb-4 flex items-center gap-4">
-              <img
-                src={teacher.avatarUrl}
-                alt={teacher.name}
-                className="w-16 h-16 rounded-2xl object-cover border-2 border-brand-sky-light shadow-sm"
-              />
+{teacher.avatarUrl ? (
+            <img
+              src={teacher.avatarUrl}
+              alt={teacher.name}
+              className="w-16 h-16 rounded-2xl object-cover border-2 border-brand-sky-light shadow-sm"
+            />
+          ) : (
+            <div className="w-16 h-16 rounded-2xl bg-accent-blue-subtle text-accent-blue flex items-center justify-center text-lg font-extrabold shrink-0" aria-hidden="true">
+              {teacher.name.charAt(0)}
+            </div>
+          )}
               <div>
                 <h4 className="text-base font-bold text-primary">{teacher.name}</h4>
                 <p className="text-xs text-accent-blue font-semibold">{teacher.designation}</p>
@@ -58,15 +64,8 @@ export const TeacherProfileDrawer: React.FC<TeacherProfileDrawerProps> = ({
             {/* Details List */}
             <div className="space-y-3 py-4 text-xs">
               <div className="p-3.5 rounded-2xl bg-surface-raised border border-border">
-                <span className="text-muted font-bold block mb-1">Department</span>
-                <span className="font-semibold text-primary">{teacher.department}</span>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-surface-raised border border-border">
                 <span className="text-muted font-bold block mb-1">Academic Qualifications</span>
-                <span className="font-semibold text-primary">
-                  {teacher.qualification} ({teacher.experience})
-                </span>
+                <span className="font-semibold text-primary">{teacher.qualification || '—'}</span>
               </div>
 
               <div className="p-3.5 rounded-2xl bg-surface-raised border border-border">
@@ -76,7 +75,7 @@ export const TeacherProfileDrawer: React.FC<TeacherProfileDrawerProps> = ({
 
               <div className="p-3.5 rounded-2xl bg-surface-raised border border-border">
                 <span className="text-muted font-bold block mb-1">Phone Number</span>
-                <span className="font-semibold text-primary">{teacher.phone}</span>
+                <span className="font-semibold text-primary">{teacher.phone || '—'}</span>
               </div>
 
               <div className="p-3.5 rounded-2xl bg-surface-raised border border-border">

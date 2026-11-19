@@ -11,30 +11,28 @@ export const studentService = {
   getStudents: async (params?: { search?: string; classId?: string; sectionId?: string; limit?: number }): Promise<Student[]> => {
     const res = await api.get('/students', { params: { limit: 100, ...params } });
     const raw = Array.isArray(res.data?.data) ? res.data.data : [];
+    // Map only fields the list API actually returns — never invent values
     return raw.map((s: any) => {
-      const activeEnrollment = s.enrollments?.[0];
+      const sectionName = s.section && s.section !== 'Unassigned' ? s.section : null;
       return {
         id: s.id,
         admissionNo: s.admissionNo,
-        rollNo: String(activeEnrollment?.rollNumber || ''),
+        rollNo: s.rollNumber ? String(s.rollNumber) : '',
         firstName: s.firstName,
         lastName: s.lastName,
-        name: `${s.firstName} ${s.lastName}`,
-        email: s.user?.email || s.email,
+        name: s.fullName || [s.firstName, s.lastName].filter(Boolean).join(' '),
+        email: s.email,
         gender: s.gender,
         dateOfBirth: s.dateOfBirth,
-        bloodGroup: s.bloodGroup || 'O+',
+        bloodGroup: s.bloodGroup || undefined,
         status: s.status,
-        class: activeEnrollment?.class?.name || 'Class 10',
-        section: activeEnrollment?.section?.name ? `Section ${activeEnrollment.section.name}` : 'Section A',
-        attendancePercentage: 92.4,
-        feeStatus: 'PAID',
-        feeBalance: 0,
-        avatarUrl: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200`,
-        parentName: s.parentName || 'Parent / Guardian',
-        parentPhone: s.emergencyPhone || '+91 98765 43210',
-        busRoute: s.busRoute || 'Route #4 (Green Park)',
-        aadhaarNo: s.aadhaarNo || '•••• •••• 9012',
+        class: s.class || 'Unassigned',
+        section: sectionName ? `Section ${sectionName}` : '—',
+        attendancePercentage: typeof s.attendancePercentage === 'number' ? s.attendancePercentage : undefined,
+        feeBalance: Number(s.feeBalance ?? 0),
+        avatarUrl: s.avatarUrl || undefined,
+        parentName: s.parentName || undefined,
+        parentPhone: s.parentPhone || undefined,
       };
     });
   },

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
 import {
   AlertCircle,
@@ -11,7 +11,7 @@ import {
   UserRound,
   Wallet,
 } from 'lucide-react';
-import { api } from '../../../lib/api';
+import { useChildFees, useSelectedChild } from '../../../hooks';
 
 interface ParentFeeLedgerViewProps {
   user: {
@@ -95,79 +95,21 @@ const statusStyle = (status: string) => {
 };
 
 export const ParentFeeLedgerView: React.FC<ParentFeeLedgerViewProps> = ({ user }) => {
-  const [children, setChildren] = useState<Child[]>([]);
-  const [selectedChildId, setSelectedChildId] = useState('');
-  const [feeData, setFeeData] = useState<FeeData | null>(null);
-  const [loadingChildren, setLoadingChildren] = useState(true);
-  const [loadingFees, setLoadingFees] = useState(false);
-  const [error, setError] = useState('');
-  const [retryKey, setRetryKey] = useState(0);
-
-  const loadChildren = useCallback(async () => {
-    setLoadingChildren(true);
-    setError('');
-
-    try {
-      const response = await api.get('/parent/children');
-      const result = response.data?.data ?? response.data;
-      const list: Child[] = Array.isArray(result) ? result : [];
-
-      setChildren(list);
-      setSelectedChildId((current) =>
-        list.some((child) => child.id === current)
-          ? current
-          : list[0]?.id ?? '',
-      );
-    } catch {
-      setChildren([]);
-      setSelectedChildId('');
-      setError('Unable to load linked children. Please try again.');
-    } finally {
-      setLoadingChildren(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadChildren();
-  }, [loadChildren, retryKey]);
-
-  useEffect(() => {
-    if (!selectedChildId) {
-      setFeeData(null);
-      return;
-    }
-
-    const controller = new AbortController();
-
-    const loadFees = async () => {
-      setLoadingFees(true);
-      setError('');
-      setFeeData(null);
-
-      try {
-        const response = await api.get(
-          `/parent/children/${selectedChildId}/fees`,
-          { signal: controller.signal },
-        );
-
-        const result = response.data?.data ?? response.data;
-        setFeeData(result as FeeData);
-      } catch {
-        if (controller.signal.aborted) return;
-
-        setFeeData(null);
-        setError('Unable to load fee details. Please try again.');
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoadingFees(false);
-        }
-      }
-    };
-
-    void loadFees();
-
-    return () => controller.abort();
-  }, [selectedChildId, retryKey]);
+  const { childrenQuery, children: linkedChildren, selectedChildId, setSelectedChildId } = useSelectedChild();
+  const children = linkedChildren as unknown as Child[];
+  const detailQuery = useChildFees<FeeData>(selectedChildId);
+  const feeData = detailQuery.data ?? null;
+  const loadingChildren = childrenQuery.isLoading;
+  const loadingFees = detailQuery.isLoading;
+  const error = childrenQuery.error
+    ? 'Unable to load linked children. Please try again.'
+    : detailQuery.error
+      ? 'Unable to load fee details. Please try again.'
+      : '';
+  const retry = () => {
+    void childrenQuery.refetch();
+    if (selectedChildId) void detailQuery.refetch();
+  };
 
   const selectedChild = children.find((child) => child.id === selectedChildId);
 
@@ -227,7 +169,7 @@ export const ParentFeeLedgerView: React.FC<ParentFeeLedgerViewProps> = ({ user }
 
           <button
             type="button"
-            onClick={() => setRetryKey((value) => value + 1)}
+            onClick={() => retry()}
             className="inline-flex items-center gap-2 rounded-2xl border border-border bg-surface px-4 py-2 text-xs font-bold text-primary shadow-sm hover:bg-canvas transition-all cursor-pointer active:scale-95"
           >
             <RefreshCw size={14} />
@@ -245,7 +187,7 @@ export const ParentFeeLedgerView: React.FC<ParentFeeLedgerViewProps> = ({ user }
           <span className="flex-1">{error}</span>
           <button
             type="button"
-            onClick={() => setRetryKey((value) => value + 1)}
+            onClick={() => retry()}
             className="font-bold underline cursor-pointer"
           >
             Try again

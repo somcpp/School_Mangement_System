@@ -31,10 +31,10 @@ import { ExamsPage } from './pages/ExamsPage';
 import {
   LibraryPage,
   MessagesPage,
-  ReportsPage,
   SettingsPage,
 } from './pages/OtherPages';
 import { NotificationsPage } from './pages/NotificationsPage';
+import { ReportsPage } from './pages/ReportsPage';
 import { NotificationProvider } from './context/NotificationContext';
 import { SocketProvider } from './context/SocketContext';
 

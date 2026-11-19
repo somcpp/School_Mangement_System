@@ -4,6 +4,7 @@
  */
 
 import { prisma } from '../../db/prisma.js';
+import { assertCanAccessStudent, type Requester } from '../students/student-access.js';
 import { AppError } from '../../utils/apiError.js';
 import { SubmitAttendanceInput } from './attendance.schema.js';
 import { AttendanceStatus } from '@prisma/client';
@@ -189,8 +190,10 @@ export class AttendanceService {
   static async getStudentAttendance(
     schoolId: string,
     studentId: string,
-    query: { startDate?: string; endDate?: string }
+    query: { startDate?: string; endDate?: string },
+    requester?: Requester
   ) {
+    await assertCanAccessStudent(schoolId, requester, studentId);
     const student = await prisma.student.findFirst({
       where: { id: studentId, schoolId },
     });

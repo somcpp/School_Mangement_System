@@ -21,7 +21,7 @@ export const StudentProfileDrawer: React.FC<StudentProfileDrawerProps> = ({
   const navigate = useNavigate();
   if (!student) return null;
 
-  const attendance = student.attendanceRate ?? student.attendancePercentage ?? 90;
+  const attendance = student.attendanceRate ?? student.attendancePercentage;
   const feeDue = student.feeBalance ?? 0;
 
   return (
@@ -82,10 +82,10 @@ export const StudentProfileDrawer: React.FC<StudentProfileDrawerProps> = ({
                 <span className="text-[10px] font-bold text-muted block mb-0.5">ATTENDANCE</span>
                 <span
                   className={`text-sm font-extrabold ${
-                    attendance >= 75 ? 'text-accent-green' : 'text-accent-rose'
+                    attendance === undefined ? 'text-muted' : attendance >= 75 ? 'text-accent-green' : 'text-accent-rose'
                   }`}
                 >
-                  {attendance}%
+                  {attendance === undefined ? '—' : `${attendance}%`}
                 </span>
               </div>
               <div className="p-3 rounded-2xl bg-surface-raised border border-border text-center">
@@ -97,7 +97,7 @@ export const StudentProfileDrawer: React.FC<StudentProfileDrawerProps> = ({
               <div className="p-3 rounded-2xl bg-surface-raised border border-border text-center">
                 <span className="text-[10px] font-bold text-muted block mb-0.5">BLOOD GROUP</span>
                 <span className="text-sm font-extrabold text-accent-violet">
-                  {student.bloodGroup || 'B+'}
+                  {student.bloodGroup || '—'}
                 </span>
               </div>
             </div>
@@ -106,13 +106,13 @@ export const StudentProfileDrawer: React.FC<StudentProfileDrawerProps> = ({
             <div className="space-y-3 text-xs">
               <div className="p-3.5 rounded-2xl bg-surface-raised border border-border">
                 <span className="text-muted font-bold block mb-1">Parent / Guardian</span>
-                <span className="font-bold text-primary text-sm">{student.parentName || 'Parent Guardian'}</span>
-                <span className="text-secondary block mt-0.5">{student.parentPhone || '+91 98765 00000'}</span>
+                <span className="font-bold text-primary text-sm">{student.parentName || 'No parent linked'}</span>
+                <span className="text-secondary block mt-0.5">{student.parentPhone || '—'}</span>
               </div>
 
               <div className="p-3.5 rounded-2xl bg-surface-raised border border-border">
                 <span className="text-muted font-bold block mb-1">Date of Birth</span>
-                <span className="font-semibold text-primary">{student.dob || student.dateOfBirth || '2010-08-15'}</span>
+                <span className="font-semibold text-primary">{student.dob || student.dateOfBirth ? new Date((student.dob || student.dateOfBirth) as string).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span>
               </div>
 
               <div className="p-3.5 rounded-2xl bg-surface-raised border border-border">

@@ -1,52 +1,67 @@
 /**
  * @file report.service.ts
- * @description Frontend API service for Compliance, Attendance, and Financial Institutional Reports.
+ * @description Frontend API service for institutional attendance and fee reports.
+ * `schoolId` is only needed (and only honoured) for a Super Admin viewing a specific tenant.
  */
 
 import { api } from '../lib/api';
 
-export interface AttendanceReportData {
-  totalRecords: number;
-  overallPresentPercentage: number;
-  classBreakdown?: Array<{
-    className: string;
-    sectionName: string;
-    presentCount: number;
-    absentCount: number;
-    attendanceRate: number;
-  }>;
-  defaulters?: Array<{
-    studentId: string;
-    studentName: string;
-    className: string;
-    attendanceRate: number;
-  }>;
+export interface AttendanceReportStudent {
+  id: string;
+  admissionNo: string;
+  name: string;
+  totalDays: number;
+  presentDays: number;
+  absentDays: number;
+  percentage: number;
 }
 
-export interface FeeReportData {
-  totalInvoiced: number;
+/** GET /reports/attendance */
+export interface AttendanceReportData {
+  dateRange: { startDate: string; endDate: string };
+  classId: string;
+  overallAttendanceRate: number;
+  studentsCount: number;
+  students: AttendanceReportStudent[];
+}
+
+export interface FeeStructureSummary {
+  id: string;
+  name: string;
+  class: string;
+  invoicesCount: number;
+  totalBilled: number;
   totalCollected: number;
   totalPending: number;
-  collectionRate: number;
-  paymentModeBreakdown?: Record<string, number>;
+  collectionPercentage: number;
 }
 
+/** GET /reports/fees */
+export interface FeeReportData {
+  feeStructures: FeeStructureSummary[];
+}
+
+export interface AttendanceReportParams {
+  classId: string;
+  sectionId?: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  schoolId?: string;
+}
+
+const withoutEmpty = (params: Record<string, string | undefined>) =>
+  Object.fromEntries(Object.entries(params).filter(([, v]) => v));
+
 export const reportService = {
-  /**
-   * Fetch institutional attendance report & defaulter analytics
-   */
-  async getAttendanceReport(academicYearId?: string): Promise<AttendanceReportData> {
-    const params = academicYearId ? { academicYearId } : {};
-    const response = await api.get<{ data: AttendanceReportData }>('/reports/attendance', { params });
+  async getAttendanceReport(params: AttendanceReportParams): Promise<AttendanceReportData> {
+    const response = await api.get<{ data: AttendanceReportData }>('/reports/attendance', {
+      params: withoutEmpty({ ...params }),
+    });
     return response.data.data;
   },
 
-  /**
-   * Fetch institutional fee collection report
-   */
-  async getFeeReport(academicYearId?: string): Promise<FeeReportData> {
-    const params = academicYearId ? { academicYearId } : {};
-    const response = await api.get<{ data: FeeReportData }>('/reports/fees', { params });
-    return response.data.data;
+  async getFeeReport(params: { academicYearId?: string; schoolId?: string } = {}): Promise<FeeReportData> {
+    const response = await api.get<{ data: FeeReportData }>('/reports/fees', { params: withoutEmpty(params) });
+    return response.data.data ?? { feeStructures: [] };
   },
 };

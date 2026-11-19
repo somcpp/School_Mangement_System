@@ -18,3 +18,4 @@ export * from './school.service';
 export * from './subscription.service';
 export * from './assignment.service';
 export * from './notification.service';
+export * from './parent.service';

@@ -4,7 +4,7 @@
  */
 
 import { api } from '../lib/api';
-import type { AcademicYear, ClassItem, SectionItem, SubjectItem } from '../types';
+import type { AcademicYear, ClassItem, MySubjectsResponse, SectionItem, SubjectItem } from '../types';
 
 export const academicService = {
   /** List all academic years */
@@ -38,6 +38,12 @@ export const academicService = {
   },
 
   /** List all subjects */
+  /** Signed-in student's subjects, teachers and weekly periods (student role only) */
+  getMySubjects: async (): Promise<MySubjectsResponse> => {
+    const res = await api.get('/academics/my-subjects');
+    return res.data?.data ?? { studentId: '', enrollment: null, subjects: [] };
+  },
+
   getSubjects: async (): Promise<SubjectItem[]> => {
     const res = await api.get('/academics/subjects');
     return Array.isArray(res.data?.data) ? res.data.data : [];

@@ -4,6 +4,7 @@
  */
 
 import { prisma } from '../../db/prisma.js';
+import { assertCanAccessStudent, type Requester } from './student-access.js';
 import { AppError } from '../../utils/apiError.js';
 import { hashPassword } from '../../utils/password.js';
 import { CreateStudentInput, UpdateStudentInput } from './students.schema.js';
@@ -173,8 +174,35 @@ export class StudentsService {
       }),
     ]);
 
+    // Per-student attendance and outstanding fees for this page, in two batched queries (no N+1)
+    const ids = students.map((s) => s.id);
+    const [attendanceGroups, feeGroups] = ids.length
+      ? await Promise.all([
+          prisma.attendanceRecord.groupBy({
+            by: ['studentId', 'status'],
+            where: { studentId: { in: ids }, student: { schoolId } },
+            _count: { _all: true },
+          }),
+          prisma.feeInvoice.groupBy({
+            by: ['studentId'],
+            where: { schoolId, studentId: { in: ids } },
+            _sum: { balanceAmount: true },
+          }),
+        ])
+      : [[], []];
+
+    const attendanceByStudent = new Map<string, { total: number; present: number }>();
+    for (const g of attendanceGroups) {
+      const entry = attendanceByStudent.get(g.studentId) ?? { total: 0, present: 0 };
+      entry.total += g._count._all;
+      if (g.status === 'PRESENT') entry.present += g._count._all;
+      attendanceByStudent.set(g.studentId, entry);
+    }
+    const feeBalanceByStudent = new Map(feeGroups.map((g) => [g.studentId, Number(g._sum.balanceAmount ?? 0)]));
+
     const formatted = students.map((s) => {
       const activeEnrollment = s.enrollments[0];
+      const att = attendanceByStudent.get(s.id);
       return {
         id: s.id,
         admissionNo: s.admissionNo,
@@ -193,6 +221,11 @@ export class StudentsService {
         academicYear: activeEnrollment?.academicYear?.name || null,
         parentName: s.parent?.user?.name || null,
         parentPhone: s.parent?.phone || null,
+        bloodGroup: s.bloodGroup ?? null,
+        // null = no attendance recorded yet (not 100%)
+        attendancePercentage: att && att.total > 0 ? Math.round((att.present / att.total) * 1000) / 10 : null,
+        attendanceDays: att?.total ?? 0,
+        feeBalance: feeBalanceByStudent.get(s.id) ?? 0,
         createdAt: s.createdAt,
       };
     });
@@ -204,7 +237,8 @@ export class StudentsService {
    * Get rich detail of a single student (profile, stats, attendance %, fee balances, history)
    * Directly matches Frontend Wireframe Section 11!
    */
-  static async getStudentById(schoolId: string, studentId: string) {
+  static async getStudentById(schoolId: string, studentId: string, requester?: Requester) {
+    await assertCanAccessStudent(schoolId, requester, studentId);
     const student = await prisma.student.findFirst({
       where: { id: studentId, schoolId },
       include: {

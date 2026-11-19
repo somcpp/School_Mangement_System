@@ -47,7 +47,8 @@ export class AttendanceController {
       const history = await AttendanceService.getStudentAttendance(
         req.schoolId!,
         req.params.studentId,
-        { startDate, endDate }
+        { startDate, endDate },
+        req.user
       );
       return ApiResponse.success(res, history);
     } catch (error) {

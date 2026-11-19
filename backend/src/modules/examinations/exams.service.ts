@@ -5,6 +5,7 @@
  */
 
 import { prisma } from '../../db/prisma.js';
+import { assertCanAccessStudent, type Requester } from '../students/student-access.js';
 import { AppError } from '../../utils/apiError.js';
 import {
   CreateExamInput,
@@ -200,7 +201,15 @@ export class ExamsService {
   /**
    * Generate comprehensive Student Report Card for an Exam
    */
-  static async getStudentReportCard(schoolId: string, examId: string, studentId: string) {
+  static async getStudentReportCard(
+    schoolId: string,
+    examId: string,
+    studentId: string,
+    requester?: Requester
+  ) {
+    // Students may only open their own report card, parents only their children's
+    await assertCanAccessStudent(schoolId, requester, studentId);
+
     const student = await prisma.student.findFirst({
       where: { id: studentId, schoolId },
       include: {

@@ -4,14 +4,13 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../lib/api';
 import { timetableService } from '../services';
 import type { CreateTimetableEntryDto, TimetableFilters } from '../services';
+import { useParentChildren, useParentDashboard } from './useParent';
 
 export const TIMETABLE_KEYS = {
   all: ['timetable'] as const,
   list: (filters: TimetableFilters) => [...TIMETABLE_KEYS.all, 'list', filters] as const,
-  parentScope: () => [...TIMETABLE_KEYS.all, 'parent-scope'] as const,
 };
 
 /**
@@ -38,44 +37,44 @@ export interface ClassScope {
 }
 
 /**
- * For parents: resolve the first child's active class/section via the parent dashboard API.
+ * For parents: resolve the first child's active class/section from the (shared, cached)
+ * parent children + dashboard queries.
  */
 export const useParentClassScope = (enabled: boolean) => {
-  return useQuery({
-    queryKey: TIMETABLE_KEYS.parentScope(),
-    enabled,
-    staleTime: 1000 * 60 * 10,
-    queryFn: async (): Promise<ClassScope | null> => {
-      const childrenRes = await api.get<{ data: Array<{ id: string; firstName: string; lastName?: string | null }> }>(
-        '/parent/children'
-      );
-      const child = childrenRes.data.data?.[0];
-      if (!child) return null;
+  const childrenQuery = useParentChildren(enabled);
+  const child = childrenQuery.data?.[0];
+  const dashboardQuery = useParentDashboard<{
+    enrollment?: {
+      classId: string;
+      sectionId: string;
+      rollNumber?: string | null;
+      class?: { name: string };
+      section?: { name: string };
+    } | null;
+  }>(enabled && child ? child.id : '');
 
-      const dashRes = await api.get<{
-        data: {
-          enrollment?: {
-            classId: string;
-            sectionId: string;
-            rollNumber?: string | null;
-            class?: { name: string };
-            section?: { name: string };
-          } | null;
-        };
-      }>('/parent/dashboard', { params: { studentId: child.id } });
+  const enrollment = dashboardQuery.data?.enrollment;
+  const data: ClassScope | null =
+    child && enrollment
+      ? {
+          classId: enrollment.classId,
+          sectionId: enrollment.sectionId,
+          className: enrollment.class?.name,
+          sectionName: enrollment.section?.name,
+          rollNumber: enrollment.rollNumber,
+          studentName: [child.firstName, child.lastName].filter(Boolean).join(' '),
+        }
+      : null;
 
-      const enrollment = dashRes.data.data?.enrollment;
-      if (!enrollment) return null;
-      return {
-        classId: enrollment.classId,
-        sectionId: enrollment.sectionId,
-        className: enrollment.class?.name,
-        sectionName: enrollment.section?.name,
-        rollNumber: enrollment.rollNumber,
-        studentName: [child.firstName, child.lastName].filter(Boolean).join(' '),
-      };
+  return {
+    data,
+    isLoading: childrenQuery.isLoading || dashboardQuery.isLoading,
+    error: childrenQuery.error || dashboardQuery.error,
+    refetch: () => {
+      void childrenQuery.refetch();
+      if (child) void dashboardQuery.refetch();
     },
-  });
+  };
 };
 
 export const useCreateTimetableEntry = () => {

@@ -16,6 +16,7 @@ import {
 import { PaginationParams } from '../../utils/pagination.js';
 import { InvoiceStatus, PaymentMethod, Prisma } from '@prisma/client';
 import { razorpayInstance, verifyRazorpaySignature } from '../../config/razorpay.js';
+import { assertCanAccessStudent, getAccessibleStudentIds, type Requester } from '../students/student-access.js';
 import { env } from '../../config/env.js';
 
 export class FinanceService {
@@ -166,11 +167,21 @@ export class FinanceService {
       status?: InvoiceStatus;
       search?: string;
       academicYearId?: string;
-    }
+    },
+    requester?: Requester
   ) {
     const where: Prisma.FeeInvoiceWhereInput = { schoolId };
 
-    if (filters.studentId) where.studentId = filters.studentId;
+    // Students see only their own invoices, parents only their children's
+    const visibleStudentIds = await getAccessibleStudentIds(schoolId, requester);
+    if (visibleStudentIds) {
+      if (filters.studentId && !visibleStudentIds.includes(filters.studentId)) {
+        return { total: 0, invoices: [] };
+      }
+      where.studentId = filters.studentId ?? { in: visibleStudentIds };
+    } else if (filters.studentId) {
+      where.studentId = filters.studentId;
+    }
     if (filters.status) where.status = filters.status;
     if (filters.academicYearId) where.academicYearId = filters.academicYearId;
 
@@ -364,7 +375,7 @@ export class FinanceService {
   /**
    * Create Razorpay order for an invoice
    */
-  static async createFeeOrder(schoolId: string, input: CreateFeeOrderInput) {
+  static async createFeeOrder(schoolId: string, input: CreateFeeOrderInput, requester?: Requester) {
     if (!razorpayInstance || !env.RAZORPAY_KEY_ID) {
       throw AppError.badRequest('Razorpay gateway is not configured on the server');
     }
@@ -375,6 +386,7 @@ export class FinanceService {
     if (!invoice) {
       throw AppError.notFound('Fee invoice not found');
     }
+    await assertCanAccessStudent(schoolId, requester, invoice.studentId);
 
     const currentBalance = Number(invoice.balanceAmount);
     if (input.amount > currentBalance) {
@@ -411,7 +423,8 @@ export class FinanceService {
   static async verifyAndCollectOnlinePayment(
     schoolId: string,
     input: VerifyFeePaymentInput,
-    actorUserId: string
+    actorUserId: string,
+    requester?: Requester
   ) {
     const isValid = verifyRazorpaySignature(
       input.razorpayOrderId,
@@ -421,12 +434,43 @@ export class FinanceService {
     if (!isValid) {
       throw AppError.badRequest('Invalid Razorpay payment signature');
     }
+    if (!razorpayInstance) {
+      throw AppError.badRequest('Razorpay gateway is not configured on the server');
+    }
+
+    // The signature only proves order+payment ids. Amount and invoice must come from the
+    // order we created server-side — never from the client body.
+    const order = await razorpayInstance.orders.fetch(input.razorpayOrderId);
+    const notes = (order.notes ?? {}) as Record<string, string | number | undefined>;
+    if (notes.invoiceId !== input.feeInvoiceId || notes.schoolId !== schoolId) {
+      throw AppError.badRequest('This payment does not belong to the selected invoice');
+    }
+    const paidAmount = Number(order.amount) / 100;
+    if (!Number.isFinite(paidAmount) || paidAmount <= 0) {
+      throw AppError.badRequest('Invalid order amount');
+    }
+
+    const invoice = await prisma.feeInvoice.findFirst({
+      where: { id: input.feeInvoiceId, schoolId },
+      select: { studentId: true },
+    });
+    if (!invoice) throw AppError.notFound('Fee invoice not found');
+    await assertCanAccessStudent(schoolId, requester, invoice.studentId);
+
+    // Replay guard: a Razorpay payment can only be credited once
+    const alreadyRecorded = await prisma.feePayment.findFirst({
+      where: { schoolId, transactionRef: input.razorpayPaymentId },
+      select: { id: true },
+    });
+    if (alreadyRecorded) {
+      throw AppError.conflict('This payment has already been recorded');
+    }
 
     return FinanceService.collectPayment(
       schoolId,
       {
         feeInvoiceId: input.feeInvoiceId,
-        amount: input.amount,
+        amount: paidAmount,
         paymentMethod: PaymentMethod.ONLINE,
         transactionRef: input.razorpayPaymentId,
         remarks: `Paid online via Razorpay (Order: ${input.razorpayOrderId})`,

@@ -51,7 +51,7 @@ export class StudentsController {
 
   static async getStudentById(req: Request, res: Response, next: NextFunction) {
     try {
-      const studentDetails = await StudentsService.getStudentById(req.schoolId!, req.params.id);
+      const studentDetails = await StudentsService.getStudentById(req.schoolId!, req.params.id, req.user);
       return ApiResponse.success(res, studentDetails);
     } catch (error) {
       next(error);

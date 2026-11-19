@@ -1,7 +1,14 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ParentDashboardView } from './ParentDashboardView';
+
+// Fresh cache per test, no automatic retries so error states show immediately
+const renderView = (ui: React.ReactElement) =>
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>,
+  );
 
 const { mockGet } = vi.hoisted(() => ({
   mockGet: vi.fn(),
@@ -116,7 +123,7 @@ describe('ParentDashboardView', () => {
       throw new Error(`Unexpected API request: ${path}`);
     });
 
-    render(<ParentDashboardView user={{ name: 'Rahul Sharma Parent' }} />);
+    renderView(<ParentDashboardView user={{ name: 'Rahul Sharma Parent' }} />);
 
     expect(
       await screen.findByRole('heading', { name: 'Parent Dashboard' }),
@@ -135,7 +142,7 @@ describe('ParentDashboardView', () => {
       data: { data: [] },
     });
 
-    render(<ParentDashboardView user={{ name: 'Test Parent' }} />);
+    renderView(<ParentDashboardView user={{ name: 'Test Parent' }} />);
 
     expect(
       await screen.findByText('No linked children found'),
@@ -145,7 +152,7 @@ describe('ParentDashboardView', () => {
   it('shows an error when the children API request fails', async () => {
     mockGet.mockRejectedValue(new Error('Session has expired'));
 
-    render(<ParentDashboardView user={{ name: 'Test Parent' }} />);
+    renderView(<ParentDashboardView user={{ name: 'Test Parent' }} />);
 
     expect(
       await screen.findByText('Could not load your children'),
@@ -164,7 +171,7 @@ describe('ParentDashboardView', () => {
         data: { data: mockDashboard },
       });
 
-    render(<ParentDashboardView user={{ name: 'Test Parent' }} />);
+    renderView(<ParentDashboardView user={{ name: 'Test Parent' }} />);
 
     await screen.findByText('Could not load your children');
 

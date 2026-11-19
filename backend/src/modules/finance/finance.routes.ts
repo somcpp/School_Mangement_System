@@ -81,15 +81,11 @@ router.post(
   FinanceController.verifyAndCollectOnlinePayment
 );
 
-// Direct / Offline Payment Collection
+// Direct / Offline Payment Collection — school office only. Students/parents must pay
+// through Razorpay (create-order + verify), otherwise they could mark invoices as paid.
 router.post(
   '/payments/collect',
-  requireRoles(
-    UserRole.SCHOOL_ADMIN,
-    UserRole.SUPER_ADMIN,
-    UserRole.STUDENT,
-    UserRole.PARENT
-  ),
+  requireRoles(UserRole.SCHOOL_ADMIN, UserRole.SUPER_ADMIN),
   validate(collectPaymentSchema),
   FinanceController.collectPayment
 );

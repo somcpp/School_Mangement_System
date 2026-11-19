@@ -15,19 +15,19 @@ export const teacherService = {
       id: t.id,
       employeeId: t.employeeId,
       name: t.name || t.user?.name || 'Faculty Member',
-      designation: t.designation || 'Senior Faculty',
-      department: t.department || 'Academics',
+      designation: t.designation || 'Teacher',
+      department: t.department || '',
       email: t.user?.email || t.email || '',
-      phone: t.user?.phone || t.phone || '+91 98765 43210',
-      qualification: t.qualification || 'M.Sc, B.Ed',
-      experience: t.experience || '5+ Years',
+      phone: t.phone || t.user?.phone || '',
+      qualification: t.qualification || '',
+      experience: '',
       subjects: t.assignedSubjects?.map((as: any) => `${as.class} ${as.subject}`) ||
         (Array.isArray(t.subjects) ? t.subjects : [t.designation || 'General Studies']),
-      avatarUrl:
-        t.avatarUrl ||
-        `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200`,
+      avatarUrl: t.avatarUrl || t.user?.avatarUrl || '',
       status: (t.status === 'ON_LEAVE' ? 'ON_LEAVE' : 'ACTIVE') as 'ACTIVE' | 'ON_LEAVE',
-      joiningDate: t.createdAt ? new Date(t.createdAt).toLocaleDateString() : 'Active',
+      joiningDate: (t.joiningDate || t.createdAt)
+        ? new Date(t.joiningDate || t.createdAt).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+        : '',
     }));
   },
 

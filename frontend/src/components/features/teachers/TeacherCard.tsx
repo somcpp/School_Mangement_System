@@ -25,11 +25,17 @@ export const TeacherCard: React.FC<TeacherCardProps> = ({ teacher, index, onSele
       <div>
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-3">
+{teacher.avatarUrl ? (
             <img
               src={teacher.avatarUrl}
               alt={teacher.name}
               className="w-14 h-14 rounded-2xl object-cover border-2 border-brand-sky-light shadow-sm"
             />
+          ) : (
+            <div className="w-14 h-14 rounded-2xl bg-accent-blue-subtle text-accent-blue flex items-center justify-center text-lg font-extrabold shrink-0" aria-hidden="true">
+              {teacher.name.charAt(0)}
+            </div>
+          )}
             <div>
               <h3 className="text-base font-bold text-primary">{teacher.name}</h3>
               <p className="text-xs text-accent-blue font-medium">{teacher.designation}</p>
@@ -53,20 +59,22 @@ export const TeacherCard: React.FC<TeacherCardProps> = ({ teacher, index, onSele
 
         {/* Department & Qualification */}
         <div className="space-y-2 py-3 border-y border-border/50 text-xs text-secondary">
-          <div className="flex items-center gap-2">
-            <Award className="w-4 h-4 text-accent-violet shrink-0" />
-            <span className="font-medium">
-              {teacher.qualification} ({teacher.experience})
-            </span>
-          </div>
+          {teacher.qualification && (
+            <div className="flex items-center gap-2">
+              <Award className="w-4 h-4 text-accent-violet shrink-0" />
+              <span className="font-medium">{teacher.qualification}</span>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <Mail className="w-4 h-4 text-muted shrink-0" />
             <span className="truncate">{teacher.email}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <Phone className="w-4 h-4 text-muted shrink-0" />
-            <span>{teacher.phone}</span>
-          </div>
+          {teacher.phone && (
+            <div className="flex items-center gap-2">
+              <Phone className="w-4 h-4 text-muted shrink-0" />
+              <span>{teacher.phone}</span>
+            </div>
+          )}
         </div>
 
         {/* Assigned Subjects */}
@@ -88,7 +96,7 @@ export const TeacherCard: React.FC<TeacherCardProps> = ({ teacher, index, onSele
       </div>
 
       <div className="mt-6 pt-4 border-t border-border/50 flex items-center justify-between">
-        <span className="text-xs text-muted font-medium">Joined: {teacher.joiningDate || '2020'}</span>
+        <span className="text-xs text-muted font-medium">{teacher.joiningDate ? `Joined ${teacher.joiningDate}` : ''}</span>
         <button
           type="button"
           onClick={() => onSelect(teacher)}

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   GraduationCap,
@@ -21,7 +21,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 
-import { api } from '../../../lib/api';
+import { useParentDashboard, useSelectedChild } from '../../../hooks';
 
 interface ParentDashboardViewProps {
   user: { name?: string };
@@ -110,12 +110,6 @@ const getTimeGreeting = (): string => {
   return 'Hello';
 };
 
-async function apiGet<T>(path: string): Promise<T> {
-  const response = await api.get(path);
-  const payload = response.data;
-  return (payload?.data ?? payload) as T;
-}
-
 function formatDate(value?: string | null): string {
   if (!value) return 'Not available';
 
@@ -154,98 +148,25 @@ function getStatusBadgeClass(status?: string | null): string {
   return 'bg-accent-amber-subtle text-accent-amber border border-amber-500/20';
 }
 
-export const ParentDashboardView: React.FC<ParentDashboardViewProps> = ({ user }) => {
-  const [children, setChildren] = useState<Child[]>([]);
-  const [selectedChildId, setSelectedChildId] = useState('');
-  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+const errorText = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 
-  const [loadingChildren, setLoadingChildren] = useState(true);
-  const [loadingDashboard, setLoadingDashboard] = useState(false);
-  const [childrenError, setChildrenError] = useState('');
-  const [dashboardError, setDashboardError] = useState('');
-  const [retryKey, setRetryKey] = useState(0);
+export const ParentDashboardView: React.FC<ParentDashboardViewProps> = ({ user }) => {
+  const { childrenQuery, children: linkedChildren, selectedChildId, setSelectedChildId } = useSelectedChild();
+  const children = linkedChildren as unknown as Child[];
+  const dashboardQuery = useParentDashboard<DashboardData>(selectedChildId);
+  const dashboard = dashboardQuery.data ?? null;
+  const loadingChildren = childrenQuery.isLoading;
+  const loadingDashboard = dashboardQuery.isLoading;
+  const childrenError = childrenQuery.error ? errorText(childrenQuery.error, 'Unable to load your linked children.') : '';
+  const dashboardError = dashboardQuery.error ? errorText(dashboardQuery.error, 'Unable to load the academic dashboard.') : '';
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
 
   const retry = useCallback(() => {
-    setRetryKey((current) => current + 1);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadChildren() {
-      setLoadingChildren(true);
-      setChildrenError('');
-
-      try {
-        const result = await apiGet<Child[]>('/parent/children');
-        if (cancelled) return;
-
-        const linkedChildren = Array.isArray(result) ? result : [];
-        setChildren(linkedChildren);
-        setSelectedChildId((current) =>
-          linkedChildren.some((child) => child.id === current)
-            ? current
-            : linkedChildren[0]?.id ?? '',
-        );
-      } catch (error) {
-        if (cancelled) return;
-        setChildrenError(
-          error instanceof Error ? error.message : 'Unable to load your linked children.',
-        );
-        setChildren([]);
-        setSelectedChildId('');
-      } finally {
-        if (!cancelled) setLoadingChildren(false);
-      }
-    }
-
-    void loadChildren();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [retryKey]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadDashboard() {
-      if (!selectedChildId) {
-        setDashboard(null);
-        setDashboardError('');
-        setLoadingDashboard(false);
-        return;
-      }
-
-      setLoadingDashboard(true);
-      setDashboardError('');
-      setDashboard(null);
-
-      try {
-        const result = await apiGet<DashboardData>(
-          `/parent/dashboard?studentId=${encodeURIComponent(selectedChildId)}`,
-        );
-
-        if (!cancelled) setDashboard(result);
-      } catch (error) {
-        if (cancelled) return;
-        setDashboardError(
-          error instanceof Error ? error.message : 'Unable to load the academic dashboard.',
-        );
-      } finally {
-        if (!cancelled) setLoadingDashboard(false);
-      }
-    }
-
-    void loadDashboard();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedChildId, retryKey]);
+    void childrenQuery.refetch();
+    if (selectedChildId) void dashboardQuery.refetch();
+  }, [childrenQuery, dashboardQuery, selectedChildId]);
 
   if (loadingChildren) {
     return (

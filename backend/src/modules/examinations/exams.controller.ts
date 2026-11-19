@@ -69,7 +69,8 @@ export class ExamsController {
       const report = await ExamsService.getStudentReportCard(
         req.schoolId!,
         req.params.examId,
-        req.params.studentId
+        req.params.studentId,
+        req.user
       );
       return ApiResponse.success(res, report);
     } catch (error) {

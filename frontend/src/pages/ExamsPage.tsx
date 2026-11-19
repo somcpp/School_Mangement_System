@@ -4,7 +4,8 @@
  * and Official CBSE Printable Report Card Generator.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Award,
@@ -27,9 +28,20 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { examService, studentService, academicService } from '../services';
+import { examService } from '../services';
 import type { ExamItem, ExamSubject, ReportCardResponse } from '../services';
-import type { AcademicYear, ClassItem, SubjectItem, Student } from '../types';
+import {
+  EXAM_KEYS,
+  useAcademicYears,
+  useAddExamSubject,
+  useClasses,
+  useCreateExam,
+  useExamDetails,
+  useExams,
+  useStudents,
+  useSubjects,
+  useSubmitMarks,
+} from '../hooks';
 
 export const ExamsPage: React.FC = () => {
   const { user } = useAuth();
@@ -40,16 +52,46 @@ export const ExamsPage: React.FC = () => {
   // Active Tab
   const [activeTab, setActiveTab] = useState<'exams' | 'marks' | 'reportCards'>('exams');
 
-  // Core Data State
-  const [exams, setExams] = useState<ExamItem[]>([]);
-  const [classes, setClasses] = useState<ClassItem[]>([]);
-  const [subjects, setSubjects] = useState<SubjectItem[]>([]);
-  const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
-  const [selectedExam, setSelectedExam] = useState<ExamItem | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-  const [detailsLoading, setDetailsLoading] = useState(false);
+  // Core Data (React Query — cached and shared with Calendar / My Subjects)
+  const queryClient = useQueryClient();
+  const examsQuery = useExams();
+  const classesQuery = useClasses();
+  const subjectsQuery = useSubjects();
+  const yearsQuery = useAcademicYears();
+  // Full roster is only needed (and only permitted) for teachers/admins
+  const studentsQuery = useStudents(undefined, isTeacher);
+  const createExamMutation = useCreateExam();
+  const addExamSubjectMutation = useAddExamSubject();
+  const submitMarksMutation = useSubmitMarks();
+
+  const exams: ExamItem[] = examsQuery.data ?? [];
+  const classes = classesQuery.data ?? [];
+  const subjects = subjectsQuery.data ?? [];
+  const academicYears = yearsQuery.data ?? [];
+  const currentYearId = (academicYears.find((y) => y.isCurrent) ?? academicYears[0])?.id ?? '';
+
+  // Date-sheet tab: selection is an id; details come from the cache
+  const [selectedExamId, setSelectedExamId] = useState('');
+  const activeExamId = selectedExamId || exams[0]?.id || '';
+  const examDetailsQuery = useExamDetails(activeExamId);
+  const selectedExam: ExamItem | null =
+    examDetailsQuery.data ?? exams.find((e) => e.id === activeExamId) ?? null;
+  const setSelectedExam = (exam: ExamItem) => setSelectedExamId(exam.id);
+  const detailsLoading = examDetailsQuery.isLoading;
+
+  const baseQueries = [
+    { label: 'exams', q: examsQuery },
+    { label: 'classes', q: classesQuery },
+    { label: 'subjects', q: subjectsQuery },
+    { label: 'academic years', q: yearsQuery },
+    ...(isTeacher ? [{ label: 'students', q: studentsQuery }] : []),
+  ];
+  const loading = baseQueries.some(({ q }) => q.isFetching);
+  const failedLabels = baseQueries.filter(({ q }) => q.isError).map(({ label }) => label);
+  const loadError = failedLabels.length
+    ? `Could not load ${failedLabels.join(', ')}. Some information below may be incomplete.`
+    : null;
+  const retryLoad = () => baseQueries.forEach(({ q }) => void q.refetch());
 
   // Modals
   const [showCreateExamModal, setShowCreateExamModal] = useState(false);
@@ -64,13 +106,22 @@ export const ExamsPage: React.FC = () => {
   const [marksExamId, setMarksExamId] = useState<string>('');
   const [marksClassId, setMarksClassId] = useState<string>('');
   const [marksSubjectId, setMarksSubjectId] = useState<string>('');
-  const [marksStudents, setMarksStudents] = useState<Array<{ studentId: string; name: string; rollNo?: number; marks: number; remarks: string }>>([]);
+  const [marksStudents, setMarksStudents] = useState<Array<{ studentId: string; name: string; rollNo?: number; marks: number | null; remarks: string }>>([]);
   const [marksMaxScore, setMarksMaxScore] = useState<number>(100);
-  const [submittingMarks, setSubmittingMarks] = useState(false);
+  const submittingMarks = submitMarksMutation.isPending;
 
   // Report Card Search
   const [reportSearchStudentId, setReportSearchStudentId] = useState<string>('');
-  const [allStudentsList, setAllStudentsList] = useState<Array<{ id: string; name: string; admissionNo: string; className?: string }>>([]);
+  const allStudentsList = useMemo(
+    () =>
+      (studentsQuery.data ?? []).map((s) => ({
+        id: s.id,
+        name: s.name,
+        admissionNo: s.admissionNo,
+        className: s.class || '—',
+      })),
+    [studentsQuery.data]
+  );
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ type, text });
@@ -89,112 +140,58 @@ export const ExamsPage: React.FC = () => {
     }
   };
 
-  // 1. Initial Load of Exams and Academic Context
+  // 1. Default selections once the lists arrive (never overwrite a user's choice)
   useEffect(() => {
-    const fetchInitialData = async () => {
-      setLoading(true);
-      setLoadError(null);
-      try {
-        // allSettled + explicit error reporting: never hide an API failure behind an empty list
-        const results = await Promise.allSettled([
-          examService.listExams(),
-          academicService.getClasses(),
-          academicService.getSubjects(),
-          academicService.getAcademicYears(),
-          // Only fetch full school student roster for teacher/admin to prevent 403 Forbidden
-          isTeacher ? studentService.getStudents() : Promise.resolve([] as Student[]),
-        ] as const);
-        const [examsRes, classesRes, subjectsRes, yearsRes, studentsRes] = results;
-        const labels = ['exams', 'classes', 'subjects', 'academic years', 'students'];
-        const failed = results
-          .map((r, i) => (r.status === 'rejected' ? labels[i] : null))
-          .filter(Boolean);
-        if (failed.length) {
-          setLoadError(`Could not load ${failed.join(', ')}. Some information below may be incomplete.`);
-        }
-        const examsData = examsRes.status === 'fulfilled' ? examsRes.value : [];
-        const classesData = classesRes.status === 'fulfilled' ? classesRes.value : [];
-        const subjectsData = subjectsRes.status === 'fulfilled' ? subjectsRes.value : [];
-        const yearsData = yearsRes.status === 'fulfilled' ? yearsRes.value : [];
-        const studentsData = studentsRes.status === 'fulfilled' ? studentsRes.value : [];
-
-        setExams(examsData);
-        setClasses(classesData);
-        setSubjects(subjectsData);
-        setAcademicYears(yearsData);
-
-        if (examsData.length > 0) {
-          // Keep already-fetched details (date sheet) if this is the same exam — a repeated
-          // initial load (e.g. StrictMode double effects, Retry) must not wipe them out.
-          setSelectedExam((prev) => (prev?.id === examsData[0].id && prev.subjects ? prev : examsData[0]));
-          setMarksExamId(examsData[0].id);
-        }
-        if (classesData.length > 0) {
-          setMarksClassId(classesData[0].id);
-        }
-        if (subjectsData.length > 0) {
-          setMarksSubjectId(subjectsData[0].id);
-        }
-
-        if (isStudent) {
-          const myStudentId = user?.studentProfile?.id || user?.id;
-          if (myStudentId) {
-            setReportSearchStudentId(myStudentId);
-            if (examsData.length > 0) {
-              handleGenerateReportCard(myStudentId, examsData[0].id);
-            }
-          }
-        } else {
-          const formattedStudents = studentsData.map((s: Student) => ({
-            id: s.id,
-            name: s.name,
-            admissionNo: s.admissionNo,
-            className: s.class || 'Class 10',
-          }));
-          setAllStudentsList(formattedStudents);
-          if (formattedStudents.length > 0) {
-            setReportSearchStudentId(formattedStudents[0].id);
-          }
-        }
-      } catch {
-        setLoadError('Error loading exam records. Please retry.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchInitialData();
-  }, [user?.role, user?.studentProfile?.id, user?.id, reloadKey]);
-
-  // 2. Fetch specific exam details when selectedExam changes
+    if (!marksExamId && examsQuery.data?.[0]) setMarksExamId(examsQuery.data[0].id);
+  }, [examsQuery.data, marksExamId]);
   useEffect(() => {
-    if (!selectedExam?.id) return;
-    setDetailsLoading(true);
-    examService.getExamDetails(selectedExam.id).then((detailed) => {
-      setSelectedExam(detailed);
-    }).catch(() => {
-      showToast('Could not load the date sheet for this exam.', 'error');
-    }).finally(() => setDetailsLoading(false));
-  }, [selectedExam?.id]);
-
-  // 3. Load students for marks entry (only for teachers/admins)
+    if (!marksClassId && classesQuery.data?.[0]) setMarksClassId(classesQuery.data[0].id);
+  }, [classesQuery.data, marksClassId]);
   useEffect(() => {
-    // Roster is only needed (and only permitted) for teachers/admins entering marks
-    if (!isTeacher || !marksClassId) return;
-    studentService.getStudents({ classId: marksClassId }).then((students: Student[]) => {
-      const roster = students.map((s: Student, idx: number) => ({
+    if (!marksSubjectId && subjectsQuery.data?.[0]) setMarksSubjectId(subjectsQuery.data[0].id);
+  }, [subjectsQuery.data, marksSubjectId]);
+  useEffect(() => {
+    if (!isStudent && !reportSearchStudentId && allStudentsList[0]) setReportSearchStudentId(allStudentsList[0].id);
+  }, [isStudent, allStudentsList, reportSearchStudentId]);
+
+  // Students see their own report card for the latest exam straight away (once)
+  const autoReportRequested = useRef(false);
+  useEffect(() => {
+    const myStudentId = user?.studentProfile?.id;
+    const firstExam = examsQuery.data?.[0];
+    if (!isStudent || autoReportRequested.current || !myStudentId || !firstExam) return;
+    autoReportRequested.current = true;
+    setReportSearchStudentId(myStudentId);
+    void handleGenerateReportCard(myStudentId, firstExam.id);
+  }, [isStudent, user?.studentProfile?.id, examsQuery.data]);
+
+  // 2. Date sheet load failure
+  useEffect(() => {
+    if (examDetailsQuery.isError) showToast('Could not load the date sheet for this exam.', 'error');
+  }, [examDetailsQuery.isError]);
+
+  // 3. Marks entry: the selected exam's date sheet and the class roster (teachers/admins only)
+  const marksExamDetailsQuery = useExamDetails(isTeacher ? marksExamId : '');
+  const rosterQuery = useStudents(marksClassId ? { classId: marksClassId } : undefined, isTeacher && !!marksClassId);
+  useEffect(() => {
+    if (!rosterQuery.data) return;
+    // Start empty — never pre-fill marks a teacher could save by accident
+    setMarksStudents(
+      rosterQuery.data.map((s, idx) => ({
         studentId: s.id,
         name: s.name,
-        rollNo: s.rollNo ? Number(s.rollNo) || (idx + 1) : idx + 1,
-        marks: 75,
-        remarks: 'Good grasp of concepts',
-      }));
-      setMarksStudents(roster);
-    }).catch(() => {
+        rollNo: s.rollNo ? Number(s.rollNo) || idx + 1 : idx + 1,
+        marks: null,
+        remarks: '',
+      }))
+    );
+  }, [rosterQuery.data]);
+  useEffect(() => {
+    if (rosterQuery.isError) {
       setMarksStudents([]);
       showToast('Could not load the student roster for this class.', 'error');
-    });
-  }, [marksClassId, isTeacher]);
+    }
+  }, [rosterQuery.isError]);
 
   // Helper: CBSE 9-Point Grading Scale
   const getCbseGrade = (marks: number, max: number = 100) => {
@@ -212,13 +209,14 @@ export const ExamsPage: React.FC = () => {
   // Handle Marks Submission
   const handleSubmitMarks = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!marksStudents.length) {
-      showToast('No student records found to submit.', 'error');
+    const entered = marksStudents.filter((s) => s.marks !== null);
+    if (!entered.length) {
+      showToast('Enter marks for at least one student before saving.', 'error');
       return;
     }
 
-    // Find the examSubject ID matching this exam, class, and subject
-    const subjectEntry = selectedExam?.subjects?.find(
+    // Find the examSubject matching the exam chosen in THIS tab, plus class and subject
+    const subjectEntry = marksExamDetailsQuery.data?.subjects?.find(
       (s) => s.classId === marksClassId && s.subjectId === marksSubjectId
     );
 
@@ -227,21 +225,18 @@ export const ExamsPage: React.FC = () => {
       return;
     }
 
-    setSubmittingMarks(true);
     try {
-      await examService.submitMarks({
+      await submitMarksMutation.mutateAsync({
         examSubjectId: subjectEntry.id,
-        marks: marksStudents.map((s) => ({
+        marks: entered.map((s) => ({
           studentId: s.studentId,
-          marksObtained: s.marks,
+          marksObtained: s.marks as number,
           remarks: s.remarks,
         })),
       });
-      showToast(`Marks recorded successfully for ${marksStudents.length} students!`);
+      showToast(`Marks recorded successfully for ${entered.length} student${entered.length === 1 ? '' : 's'}!`);
     } catch (err: any) {
       showToast(err.response?.data?.message || 'Failed to submit marks.', 'error');
-    } finally {
-      setSubmittingMarks(false);
     }
   };
 
@@ -250,8 +245,16 @@ export const ExamsPage: React.FC = () => {
     if (!studentId || !examId) return;
     setLoadingReportCard(true);
     try {
-      const card = await examService.getStudentReportCard(examId, studentId);
-      setReportCardModalData(card);
+      const card = await queryClient.fetchQuery({
+        queryKey: EXAM_KEYS.reportCard(examId, studentId),
+        queryFn: () => examService.getStudentReportCard(examId, studentId),
+        staleTime: 1000 * 60 * 5,
+      });
+      // The API doesn't send school details — use the signed-in user's school
+      setReportCardModalData({
+        ...card,
+        school: { ...card.school, name: card.school.name || user?.school?.name || '', code: card.school.code || user?.school?.code || '' },
+      });
     } catch (err: any) {
       showToast(err.response?.data?.message || 'Could not load report card. Marks may not be published yet.', 'error');
     } finally {
@@ -321,7 +324,7 @@ export const ExamsPage: React.FC = () => {
           </span>
           <button
             type="button"
-            onClick={() => setReloadKey((k) => k + 1)}
+            onClick={retryLoad}
             disabled={loading}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface border border-border text-primary hover:bg-surface-raised transition-all cursor-pointer active:scale-95 disabled:opacity-60"
           >
@@ -703,7 +706,7 @@ export const ExamsPage: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-border text-xs">
                 {marksStudents.map((student, idx) => {
-                  const gradeInfo = getCbseGrade(student.marks, marksMaxScore);
+                  const gradeInfo = student.marks === null ? null : getCbseGrade(student.marks, marksMaxScore);
                   return (
                     <tr key={student.studentId} className="hover:bg-surface-raised/40 transition-colors">
                       <td className="py-3 px-4 font-bold text-muted">{student.rollNo || idx + 1}</td>
@@ -713,29 +716,32 @@ export const ExamsPage: React.FC = () => {
                           type="number"
                           min={0}
                           max={marksMaxScore}
-                          value={student.marks}
+                          value={student.marks ?? ''}
+                          placeholder="—"
                           onChange={(e) => {
-                            const val = Math.min(marksMaxScore, Math.max(0, Number(e.target.value)));
-                            const updated = [...marksStudents];
-                            updated[idx].marks = val;
-                            setMarksStudents(updated);
+                            const raw = e.target.value;
+                            const val = raw === '' ? null : Math.min(marksMaxScore, Math.max(0, Number(raw)));
+                            setMarksStudents((prev) => prev.map((s, i) => (i === idx ? { ...s, marks: val } : s)));
                           }}
                           className="w-24 px-3 py-1.5 bg-surface border border-border rounded-xl font-bold text-primary text-center"
                         />
                       </td>
                       <td className="py-3 px-4">
-                        <span className={`px-3 py-1 rounded-full text-xs font-extrabold border ${gradeInfo.color}`}>
-                          {gradeInfo.grade}
-                        </span>
+                        {gradeInfo ? (
+                          <span className={`px-3 py-1 rounded-full text-xs font-extrabold border ${gradeInfo.color}`}>
+                            {gradeInfo.grade}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted">Not entered</span>
+                        )}
                       </td>
                       <td className="py-3 px-4">
                         <input
                           type="text"
                           value={student.remarks}
                           onChange={(e) => {
-                            const updated = [...marksStudents];
-                            updated[idx].remarks = e.target.value;
-                            setMarksStudents(updated);
+                            const remarks = e.target.value;
+                            setMarksStudents((prev) => prev.map((s, i) => (i === idx ? { ...s, remarks } : s)));
                           }}
                           placeholder="Add teacher remark..."
                           className="w-full max-w-xs px-3 py-1.5 bg-surface border border-border rounded-xl text-xs text-primary"
@@ -1009,15 +1015,14 @@ export const ExamsPage: React.FC = () => {
                 const form = e.currentTarget;
                 const formData = new FormData(form);
                 try {
-                  const newExam = await examService.createExam({
-                    academicYearId: academicYears[0]?.id || '',
+                  const newExam = await createExamMutation.mutateAsync({
+                    academicYearId: currentYearId,
                     name: formData.get('name') as string,
                     term: formData.get('term') as string,
                     startDate: formData.get('startDate') as string,
                     endDate: formData.get('endDate') as string,
                   });
-                  setExams([newExam, ...exams]);
-                  setSelectedExam(newExam);
+                  setSelectedExamId(newExam.id);
                   setShowCreateExamModal(false);
                   showToast('Exam created successfully!');
                 } catch (err: any) {
@@ -1134,7 +1139,7 @@ export const ExamsPage: React.FC = () => {
                 const form = e.currentTarget;
                 const formData = new FormData(form);
                 try {
-                  const newSlot = await examService.addExamSubject(selectedExam.id, {
+                  await addExamSubjectMutation.mutateAsync({ examId: selectedExam.id, data: {
                     classId: formData.get('classId') as string,
                     subjectId: formData.get('subjectId') as string,
                     examDate: formData.get('examDate') as string,
@@ -1143,11 +1148,7 @@ export const ExamsPage: React.FC = () => {
                     maxMarks: Number(formData.get('maxMarks') || 100),
                     passMarks: Number(formData.get('passMarks') || 33),
                     roomNumber: (formData.get('roomNumber') as string) || 'Hall 1',
-                  });
-
-                  // Update state
-                  const updatedSubjects = [...(selectedExam.subjects || []), newSlot];
-                  setSelectedExam({ ...selectedExam, subjects: updatedSubjects });
+                  } });
                   setShowAddSubjectModal(false);
                   showToast('Subject schedule added to date sheet!');
                 } catch (err: any) {

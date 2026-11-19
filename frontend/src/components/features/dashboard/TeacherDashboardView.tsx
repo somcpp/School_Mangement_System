@@ -3,7 +3,7 @@
  * @description Tailored Dashboard for Teachers: Roll call quick link, lecture agenda, interactive homework broadcast engine.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
@@ -21,8 +21,9 @@ import {
   Send,
   ListOrdered,
 } from 'lucide-react';
-import { academicService, assignmentService, uploadService } from '../../../services';
-import type { ClassItem, SubjectItem, Assignment } from '../../../types';
+import { uploadService } from '../../../services';
+import { SCHOOL_DAYS } from '../../../services/timetable.service';
+import { useAssignments, useClasses, useCreateAssignment, useSubjects, useTimetable } from '../../../hooks';
 
 interface TeacherDashboardViewProps {
   user: any;
@@ -40,9 +41,19 @@ export const TeacherDashboardView: React.FC<TeacherDashboardViewProps> = ({ user
   const navigate = useNavigate();
 
   // Academic Dropdown Data
-  const [classes, setClasses] = useState<ClassItem[]>([]);
-  const [subjects, setSubjects] = useState<SubjectItem[]>([]);
-  const [recentAssignments, setRecentAssignments] = useState<Assignment[]>([]);
+  const teacherId: string | undefined = user?.teacherProfile?.id;
+  const classesQuery = useClasses();
+  const subjectsQuery = useSubjects();
+  const assignmentsQuery = useAssignments();
+  const timetableQuery = useTimetable({ teacherId });
+  const createAssignment = useCreateAssignment();
+  const classes = classesQuery.data ?? [];
+  const subjects = subjectsQuery.data ?? [];
+  // The list endpoint is school-wide for staff — show this teacher's own broadcasts
+  const recentAssignments = useMemo(
+    () => (assignmentsQuery.data ?? []).filter((a) => !teacherId || a.teacherId === teacherId),
+    [assignmentsQuery.data, teacherId]
+  );
 
   // Homework Form State
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -68,54 +79,47 @@ export const TeacherDashboardView: React.FC<TeacherDashboardViewProps> = ({ user
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'create' | 'recent'>('create');
 
-  // Hardcoded fallback lectures for agenda demonstration
-  const teacherLectures = [
-    { period: 1, time: '08:30 - 09:15', class: 'Class 10-A', subject: 'Mathematics (Calculus)', room: 'Room 201', status: 'Completed' },
-    { period: 2, time: '09:15 - 10:00', class: 'Class 11-Science', subject: 'Linear Algebra', room: 'Room 304', status: 'Next' },
-    { period: 4, time: '11:00 - 11:45', class: 'Class 10-B', subject: 'Mathematics', room: 'Room 202', status: 'Upcoming' },
-    { period: 5, time: '12:30 - 01:15', class: 'Class 12-Science', subject: 'Advanced Calculus', room: 'Room 401', status: 'Upcoming' },
-  ];
+  // Today's lectures from the teacher's own timetable
+  const now = new Date();
+  const todayKey = now.getDay() >= 1 && now.getDay() <= 6 ? SCHOOL_DAYS[now.getDay() - 1] : null;
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  const toMins = (hhmm: string) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return h * 60 + m;
+  };
+  const todaysEntries = todayKey ? (timetableQuery.data?.[todayKey] ?? []) : [];
+  const nextIndex = todaysEntries.findIndex((e) => toMins(e.endTime) > nowMins);
+  const teacherLectures = todaysEntries.map((e, i) => ({
+    period: e.periodNumber,
+    time: `${e.startTime} - ${e.endTime}`,
+    class: `${e.class?.name ?? ''}${e.section?.name ? '-' + e.section.name : ''}`,
+    subject: e.subject?.name ?? 'Subject',
+    room: e.roomNumber || '—',
+    status:
+      toMins(e.endTime) <= nowMins
+        ? 'Completed'
+        : toMins(e.startTime) <= nowMins
+          ? 'Live'
+          : i === nextIndex
+            ? 'Next'
+            : 'Upcoming',
+  }));
+  const todaysClasses = [...new Set(teacherLectures.map((l) => l.class))];
+  const activeHomework = recentAssignments.filter((a) => new Date(a.dueDate).getTime() >= now.getTime()).length;
+  const totalSubmissions = recentAssignments.reduce((acc, a) => acc + (a._count?.submissions ?? 0), 0);
+  const weeklyPeriods = SCHOOL_DAYS.reduce((acc, d) => acc + (timetableQuery.data?.[d]?.length ?? 0), 0);
 
-  // Fetch classes and subjects on mount
+  // Default the homework form to the first class/section/subject once lists arrive
   useEffect(() => {
-    let isMounted = true;
-
-    async function loadAcademicData() {
-      try {
-        const [clsData, subData, assignData] = await Promise.all([
-          academicService.getClasses().catch(() => []),
-          academicService.getSubjects().catch(() => []),
-          assignmentService.getAssignments().catch(() => []),
-        ]);
-
-        if (!isMounted) return;
-
-        if (Array.isArray(clsData) && clsData.length > 0) {
-          setClasses(clsData);
-          setSelectedClassId(clsData[0].id);
-          if (clsData[0].sections && clsData[0].sections.length > 0) {
-            setSelectedSectionId(clsData[0].sections[0].id);
-          }
-        }
-
-        if (Array.isArray(subData) && subData.length > 0) {
-          setSubjects(subData);
-          setSelectedSubjectId(subData[0].id);
-        }
-
-        if (Array.isArray(assignData)) {
-          setRecentAssignments(assignData);
-        }
-      } catch (err) {
-        console.warn('Academic data pre-fetch fallback:', err);
-      }
+    const first = classesQuery.data?.[0];
+    if (!selectedClassId && first) {
+      setSelectedClassId(first.id);
+      if (first.sections?.[0]) setSelectedSectionId(first.sections[0].id);
     }
-
-    loadAcademicData();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  }, [classesQuery.data, selectedClassId]);
+  useEffect(() => {
+    if (!selectedSubjectId && subjectsQuery.data?.[0]) setSelectedSubjectId(subjectsQuery.data[0].id);
+  }, [subjectsQuery.data, selectedSubjectId]);
 
   // Sync sections when class selection changes
   const handleClassChange = (classId: string) => {
@@ -138,17 +142,11 @@ export const TeacherDashboardView: React.FC<TeacherDashboardViewProps> = ({ user
 
     try {
       const res = await uploadService.uploadFile(file, 'homework');
-      setAttachedFile({
-        name: file.name,
-        url: res?.url || URL.createObjectURL(file),
-      });
-    } catch (err) {
-      console.warn('Upload fallback to local preview URL:', err);
-      // Fallback for offline/mock environments
-      setAttachedFile({
-        name: file.name,
-        url: URL.createObjectURL(file),
-      });
+      // The API validates a full URL; local storage returns a relative path
+      setAttachedFile({ name: file.name, url: uploadService.getFileUrl(res.url) });
+    } catch (err: any) {
+      // A browser-only blob: URL would be unreadable for students — report the failure instead
+      setErrorMessage(err?.response?.data?.message || 'File upload failed. Please try again.');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -170,14 +168,18 @@ export const TeacherDashboardView: React.FC<TeacherDashboardViewProps> = ({ user
       return;
     }
 
+    if (!selectedSubjectId) {
+      setErrorMessage('Please select a subject.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
       const payload = {
         classId: selectedClassId,
-        sectionId: selectedSectionId,
-        subjectId: selectedSubjectId || (subjects[0]?.id ?? 'default-subject'),
-        academicYearId: user?.school?.currentAcademicYearId || undefined,
+        sectionId: selectedSectionId || undefined,
+        subjectId: selectedSubjectId,
         title: title.trim(),
         description: description.trim() || 'Complete the assignment questions outlined above.',
         dueDate,
@@ -185,19 +187,8 @@ export const TeacherDashboardView: React.FC<TeacherDashboardViewProps> = ({ user
         attachmentUrl: attachedFile?.url || undefined,
       };
 
-      const newAssignment = await assignmentService.createAssignment(payload as any).catch(() => ({
-        id: `local-${Date.now()}`,
-        title: payload.title,
-        description: payload.description,
-        dueDate: payload.dueDate,
-        maxMarks: payload.maxMarks,
-        status: 'PUBLISHED' as const,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        class: classes.find((c) => c.id === selectedClassId) || { name: 'Class 10-A' },
-        subject: subjects.find((s) => s.id === selectedSubjectId) || { name: 'Mathematics' },
-        _count: { submissions: 0 },
-      }));
+      await createAssignment.mutateAsync(payload as never);
+
 
       // Trigger Confetti Celebration
       try {
@@ -209,9 +200,6 @@ export const TeacherDashboardView: React.FC<TeacherDashboardViewProps> = ({ user
       } catch {
         // ignore if canvas-confetti is not loaded
       }
-
-      // Add to recent list
-      setRecentAssignments((prev) => [newAssignment as Assignment, ...prev]);
 
       // Reset form
       setTitle('');
@@ -280,36 +268,38 @@ export const TeacherDashboardView: React.FC<TeacherDashboardViewProps> = ({ user
       {/* 4 Teacher Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <div className="bg-surface rounded-3xl p-5 border border-border shadow-card">
-          <span className="text-xs font-bold text-muted uppercase tracking-wider">Class 10-A Attendance</span>
+          <span className="text-xs font-bold text-muted uppercase tracking-wider">Weekly Load</span>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-primary">39 / 42</span>
-            <span className="text-xs font-bold text-accent-green">Marked</span>
+            <span className="text-3xl font-extrabold text-primary">{timetableQuery.isLoading ? '…' : weeklyPeriods}</span>
+            <span className="text-xs font-bold text-accent-green">Periods</span>
           </div>
-          <p className="text-xs text-muted mt-1">3 Absent • Roll call done</p>
+          <p className="text-xs text-muted mt-1">From your timetable, Mon – Sat</p>
         </div>
 
         <div className="bg-surface rounded-3xl p-5 border border-border shadow-card">
           <span className="text-xs font-bold text-muted uppercase tracking-wider">Lectures Today</span>
           <div className="mt-3">
-            <span className="text-3xl font-extrabold text-primary">4 Periods</span>
-            <p className="text-xs text-muted mt-1">Class 10-A, 11-Sci, 10-B, 12-Sci</p>
+            <span className="text-3xl font-extrabold text-primary">
+              {timetableQuery.isLoading ? '…' : `${teacherLectures.length} Period${teacherLectures.length === 1 ? '' : 's'}`}
+            </span>
+            <p className="text-xs text-muted mt-1 truncate">{todaysClasses.length ? todaysClasses.join(', ') : 'No classes today'}</p>
           </div>
         </div>
 
         <div className="bg-surface rounded-3xl p-5 border border-border shadow-card">
           <span className="text-xs font-bold text-muted uppercase tracking-wider">Active Homework</span>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-primary">{recentAssignments.length || 3}</span>
-            <span className="text-xs font-bold text-accent-blue">Published</span>
+            <span className="text-3xl font-extrabold text-primary">{assignmentsQuery.isLoading ? '…' : activeHomework}</span>
+            <span className="text-xs font-bold text-accent-blue">Open</span>
           </div>
-          <p className="text-xs text-accent-amber font-medium mt-1">Assignments tracking submissions</p>
+          <p className="text-xs text-accent-amber font-medium mt-1">{recentAssignments.length} published in total</p>
         </div>
 
         <div className="bg-surface rounded-3xl p-5 border border-border shadow-card">
-          <span className="text-xs font-bold text-muted uppercase tracking-wider">Syllabus Progress</span>
+          <span className="text-xs font-bold text-muted uppercase tracking-wider">Submissions Received</span>
           <div className="mt-3">
-            <span className="text-3xl font-extrabold text-primary">68%</span>
-            <p className="text-xs text-accent-green font-medium mt-1">On schedule for Term 1</p>
+            <span className="text-3xl font-extrabold text-primary">{assignmentsQuery.isLoading ? '…' : totalSubmissions}</span>
+            <p className="text-xs text-accent-green font-medium mt-1">Across your homework</p>
           </div>
         </div>
       </div>
@@ -325,11 +315,33 @@ export const TeacherDashboardView: React.FC<TeacherDashboardViewProps> = ({ user
             </span>
           </div>
           <div className="space-y-3">
+            {timetableQuery.isLoading && (
+              <div className="space-y-3" aria-busy="true">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="h-16 rounded-2xl bg-surface-raised animate-pulse" />
+                ))}
+              </div>
+            )}
+            {!timetableQuery.isLoading && teacherLectures.length === 0 && (
+              <div className="text-center py-8 bg-surface-raised rounded-2xl border border-dashed border-border">
+                <Calendar className="w-8 h-8 text-muted mx-auto mb-2 opacity-50" />
+                <p className="text-xs font-bold text-primary">
+                  {timetableQuery.isError ? 'Could not load your timetable' : 'No lectures scheduled today'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => navigate('/timetable')}
+                  className="mt-3 px-3 py-1.5 rounded-xl bg-accent-blue text-white text-xs font-bold shadow-sm"
+                >
+                  Open Timetable
+                </button>
+              </div>
+            )}
             {teacherLectures.map((lec, i) => (
               <div
                 key={i}
                 className={`p-3.5 rounded-2xl border flex items-center justify-between transition-all ${
-                  lec.status === 'Next'
+                  lec.status === 'Next' || lec.status === 'Live'
                     ? 'bg-accent-blue-subtle/60 border-brand-sky'
                     : 'bg-surface-raised border-border'
                 }`}
@@ -348,7 +360,7 @@ export const TeacherDashboardView: React.FC<TeacherDashboardViewProps> = ({ user
                   className={`px-2.5 py-1 rounded-full text-[10px] font-bold shrink-0 ${
                     lec.status === 'Completed'
                       ? 'bg-accent-green-subtle text-accent-green'
-                      : lec.status === 'Next'
+                      : lec.status === 'Next' || lec.status === 'Live'
                       ? 'bg-accent-blue text-white'
                       : 'bg-slate-200 text-secondary'
                   }`}
@@ -637,7 +649,7 @@ export const TeacherDashboardView: React.FC<TeacherDashboardViewProps> = ({ user
                           <div className="flex items-center gap-2 flex-wrap">
                             <h4 className="font-bold text-xs text-primary">{assignment.title}</h4>
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-accent-blue-subtle text-accent-blue">
-                              {assignment.class?.name || 'Class 10'}
+                              {assignment.class?.name ?? '—'}{assignment.section?.name ? `-${assignment.section.name}` : ''}
                             </span>
                             {assignment.subject?.name && (
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-surface-raised text-secondary">

@@ -52,7 +52,7 @@ export const StudentTable: React.FC<StudentTableProps> = ({
           </thead>
           <tbody className="divide-y divide-border/40 font-medium text-secondary">
             {students.map((s) => {
-              const attendance = s.attendanceRate ?? s.attendancePercentage ?? 90;
+              const attendance = s.attendanceRate ?? s.attendancePercentage;
               const feeDue = s.feeBalance ?? 0;
 
               return (
@@ -90,7 +90,7 @@ export const StudentTable: React.FC<StudentTableProps> = ({
                       )}
                       <div>
                         <p className="font-bold text-primary">{s.name || `${s.firstName || ''} ${s.lastName || ''}`}</p>
-                        <span className="text-[10px] text-muted">{s.parentName || 'Parent Guardian'}</span>
+                        <span className="text-[10px] text-muted">{s.parentName || 'No parent linked'}</span>
                       </div>
                     </div>
                   </td>
@@ -99,15 +99,21 @@ export const StudentTable: React.FC<StudentTableProps> = ({
                     {s.class} - {s.section}
                   </td>
                   <td className="py-4 px-6">
-                    <span
-                      className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                        attendance >= 75
-                          ? 'bg-accent-green-subtle text-accent-green'
-                          : 'bg-accent-rose-subtle text-accent-rose'
-                      }`}
-                    >
-                      {attendance}% {attendance >= 75 ? 'Safe' : 'Shortage'}
-                    </span>
+                    {attendance === undefined ? (
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-surface-raised text-muted">
+                        Not recorded
+                      </span>
+                    ) : (
+                      <span
+                        className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                          attendance >= 75
+                            ? 'bg-accent-green-subtle text-accent-green'
+                            : 'bg-accent-rose-subtle text-accent-rose'
+                        }`}
+                      >
+                        {attendance}% {attendance >= 75 ? 'Safe' : 'Shortage'}
+                      </span>
+                    )}
                   </td>
                   <td className="py-4 px-6 font-bold">
                     {feeDue === 0 ? (

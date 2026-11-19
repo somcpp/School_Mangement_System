@@ -54,3 +54,32 @@ export interface ClassItem {
     enrollments: number;
   };
 }
+
+/** GET /academics/my-subjects — the signed-in student's own section and subjects */
+export interface MySubject {
+  id: string;
+  name: string;
+  code: string;
+  type?: string;
+  weeklyPeriods: number;
+  rooms: string[];
+  teacher: {
+    id: string;
+    name: string;
+    email: string;
+    designation?: string | null;
+  } | null;
+}
+
+export interface MySubjectsResponse {
+  studentId: string;
+  enrollment: {
+    classId: string;
+    sectionId: string;
+    className: string;
+    sectionName: string;
+    homeRoom?: string | null;
+    rollNumber?: string | null;
+  } | null;
+  subjects: MySubject[];
+}

@@ -6,7 +6,7 @@
  * 3. SaaS Subscription Plans & Active Billing Ledger
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -34,11 +34,7 @@ import {
   Unlock,
   RefreshCw,
 } from 'lucide-react';
-import {
-  schoolService,
-  subscriptionService,
-  dashboardService,
-} from '../services';
+import { useCreateSchool, useSchools, useSubscriptionPlans, useUpdateSchool } from '../hooks';
 import type {
   SchoolTenant,
   CreateSchoolDto,
@@ -70,10 +66,24 @@ export const SuperAdminPage: React.FC = () => {
   };
 
   // State
-  const [schools, setSchools] = useState<SchoolTenant[]>([]);
-  const [plans, setPlans] = useState<SubscriptionPlanItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const schoolsQuery = useSchools();
+  const plansQuery = useSubscriptionPlans();
+  const createSchool = useCreateSchool();
+  const updateSchool = useUpdateSchool();
+  const schools: SchoolTenant[] = schoolsQuery.data?.schools ?? [];
+  const plans: SubscriptionPlanItem[] = plansQuery.data ?? [];
+  const loading = schoolsQuery.isFetching || plansQuery.isFetching;
+  const failedParts = [
+    schoolsQuery.isError ? 'school tenants' : null,
+    plansQuery.isError ? 'subscription plans' : null,
+  ].filter(Boolean);
+  const loadError = failedParts.length
+    ? `Could not load ${failedParts.join(' and ')}. Please check the API and retry.`
+    : null;
+  const loadData = () => {
+    void schoolsQuery.refetch();
+    void plansQuery.refetch();
+  };
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'SUSPENDED' | 'TRIAL'>('ALL');
   const [planFilter, setPlanFilter] = useState<string>('ALL');
@@ -87,38 +97,6 @@ export const SuperAdminPage: React.FC = () => {
     setToastMessage({ type, text });
     setTimeout(() => setToastMessage(null), 4000);
   };
-
-  // 1. Initial Data Fetch — no fake fallbacks: surface failures instead
-  const loadData = async () => {
-    setLoading(true);
-    setLoadError(null);
-    const [schoolsRes, plansRes] = await Promise.allSettled([
-      schoolService.listSchools(),
-      subscriptionService.getPlans(),
-    ]);
-
-    if (schoolsRes.status === 'fulfilled') {
-      setSchools(schoolsRes.value.schools);
-    }
-    if (plansRes.status === 'fulfilled') {
-      setPlans(plansRes.value);
-    }
-
-    const failed = [
-      schoolsRes.status === 'rejected' ? 'school tenants' : null,
-      plansRes.status === 'rejected' ? 'subscription plans' : null,
-    ].filter(Boolean);
-    if (failed.length) {
-      const message = `Could not load ${failed.join(' and ')}. Please check the API and retry.`;
-      setLoadError(message);
-      showToast(message, 'error');
-    }
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    loadData();
-  }, []);
 
   // Filtered Schools
   const filteredSchools = schools.filter((s) => {
@@ -136,10 +114,7 @@ export const SuperAdminPage: React.FC = () => {
   const handleToggleStatus = async (school: SchoolTenant) => {
     const newStatus = school.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
     try {
-      await schoolService.updateSchool(school.id, { status: newStatus });
-      setSchools((prev) =>
-        prev.map((s) => (s.id === school.id ? { ...s, status: newStatus } : s))
-      );
+      await updateSchool.mutateAsync({ id: school.id, data: { status: newStatus } });
       showToast(`School tenant ${school.name} marked as ${newStatus}!`);
     } catch (err: any) {
       showToast(err?.response?.data?.message || `Could not update ${school.name}. Please try again.`, 'error');
@@ -790,8 +765,7 @@ export const SuperAdminPage: React.FC = () => {
                 };
 
                 try {
-                  const newSchool = await schoolService.createSchool(data);
-                  setSchools([newSchool, ...schools]);
+                  const newSchool = await createSchool.mutateAsync(data);
                   setShowProvisionModal(false);
                   showToast(`School ${newSchool.name} provisioned successfully!`);
                 } catch (err: any) {

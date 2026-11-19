@@ -15,88 +15,6 @@ import {
 } from '../components/features/students';
 import type { Student } from '../types';
 
-const defaultSeedStudents: Student[] = [
-  {
-    id: 'std_1',
-    admissionNo: 'DPA-2026-001',
-    name: 'Rahul Sharma',
-    class: 'Class 10',
-    section: 'A',
-    rollNo: '24',
-    gender: 'MALE',
-    attendanceRate: 88.4,
-    feeBalance: 5000,
-    parentName: 'Ramesh Sharma',
-    parentPhone: '+91 98765 43210',
-    status: 'ACTIVE',
-    bloodGroup: 'B+',
-    dob: '15 Aug 2010',
-  },
-  {
-    id: 'std_2',
-    admissionNo: 'DPA-2026-002',
-    name: 'Aarav Patel',
-    class: 'Class 10',
-    section: 'A',
-    rollNo: '02',
-    gender: 'MALE',
-    attendanceRate: 94.0,
-    feeBalance: 0,
-    parentName: 'Sanjay Patel',
-    parentPhone: '+91 98765 43211',
-    status: 'ACTIVE',
-    bloodGroup: 'O+',
-    dob: '02 Feb 2010',
-  },
-  {
-    id: 'std_3',
-    admissionNo: 'DPA-2026-003',
-    name: 'Ananya Iyer',
-    class: 'Class 10',
-    section: 'A',
-    rollNo: '03',
-    gender: 'FEMALE',
-    attendanceRate: 96.5,
-    feeBalance: 0,
-    parentName: 'Venkat Iyer',
-    parentPhone: '+91 98765 43212',
-    status: 'ACTIVE',
-    bloodGroup: 'A+',
-    dob: '19 May 2010',
-  },
-  {
-    id: 'std_4',
-    admissionNo: 'DPA-2026-004',
-    name: 'Devansh Verma',
-    class: 'Class 10',
-    section: 'B',
-    rollNo: '04',
-    gender: 'MALE',
-    attendanceRate: 72.1,
-    feeBalance: 12000,
-    parentName: 'Alok Verma',
-    parentPhone: '+91 98765 43213',
-    status: 'ACTIVE',
-    bloodGroup: 'AB+',
-    dob: '11 Nov 2010',
-  },
-  {
-    id: 'std_5',
-    admissionNo: 'DPA-2026-005',
-    name: 'Diya Deshmukh',
-    class: 'Class 11 - Science',
-    section: 'A',
-    rollNo: '05',
-    gender: 'FEMALE',
-    attendanceRate: 91.8,
-    feeBalance: 2500,
-    parentName: 'Nitin Deshmukh',
-    parentPhone: '+91 98765 43214',
-    status: 'ACTIVE',
-    bloodGroup: 'O+',
-    dob: '24 Jan 2009',
-  },
-];
 
 export const StudentsPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -105,13 +23,10 @@ export const StudentsPage: React.FC = () => {
   const [showAdmissionModal, setShowAdmissionModal] = useState(false);
 
   // TanStack Query Hooks
-  const { data: serverStudents = [], isLoading } = useStudents();
+  const studentsQuery = useStudents();
+  const { isLoading } = studentsQuery;
   const { data: classesList = [] } = useClasses();
-
-  // Combine live server students or fallback seeds
-  const students = useMemo(() => {
-    return serverStudents.length > 0 ? serverStudents : defaultSeedStudents;
-  }, [serverStudents]);
+  const students = useMemo(() => studentsQuery.data ?? [], [studentsQuery.data]);
 
   // Filter students by search term and selected class
   const filteredStudents = useMemo(() => {
@@ -162,6 +77,19 @@ export const StudentsPage: React.FC = () => {
         onClassChange={setSelectedClass}
         classes={classesList}
       />
+
+      {studentsQuery.isError && (
+        <div className="p-4 rounded-2xl bg-accent-rose-subtle border border-border text-accent-rose text-xs font-bold flex items-center justify-between gap-3">
+          <span>Could not load the student directory.</span>
+          <button
+            type="button"
+            onClick={() => studentsQuery.refetch()}
+            className="px-3 py-1.5 rounded-xl bg-surface border border-border text-primary hover:bg-surface-raised transition-all cursor-pointer active:scale-95"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Roster Table */}
       <StudentTable

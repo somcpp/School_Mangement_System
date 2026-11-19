@@ -6,7 +6,6 @@
 
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -18,8 +17,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useAnnouncements } from '../hooks';
-import { examService } from '../services';
+import { useAnnouncements, useExams } from '../hooks';
 import type { NoticeCategory } from '../types';
 
 type EventType = 'EXAM' | NoticeCategory;
@@ -70,11 +68,7 @@ export const CalendarPage: React.FC = () => {
   const today = startOfDay(new Date());
   const [viewMonth, setViewMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
 
-  const examsQuery = useQuery({
-    queryKey: ['exams', 'list'],
-    queryFn: () => examService.listExams(),
-    staleTime: 1000 * 60 * 5,
-  });
+  const examsQuery = useExams();
   const announcementsQuery = useAnnouncements();
 
   // ── Normalise exams + notices into calendar events ──────────────────────────
