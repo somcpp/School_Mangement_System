@@ -251,7 +251,11 @@ export const ExamsPage: React.FC = () => {
     setLoadingReportCard(true);
     try {
       const card = await examService.getStudentReportCard(examId, studentId);
-      setReportCardModalData(card);
+      // The API doesn't send school details — use the signed-in user's school
+      setReportCardModalData({
+        ...card,
+        school: { ...card.school, name: card.school.name || user?.school?.name || '', code: card.school.code || user?.school?.code || '' },
+      });
     } catch (err: any) {
       showToast(err.response?.data?.message || 'Could not load report card. Marks may not be published yet.', 'error');
     } finally {
