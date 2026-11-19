@@ -17,7 +17,7 @@ interface CollectPaymentModalProps {
 
 export const CollectPaymentModal: React.FC<CollectPaymentModalProps> = ({ invoice, onClose }) => {
   const [amount, setAmount] = useState<string>(invoice ? String(invoice.balanceAmount ?? invoice.balance ?? 0) : '');
-  const [method, setMethod] = useState<'CASH' | 'ONLINE_UPI' | 'BANK_TRANSFER'>('CASH');
+  const [method, setMethod] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER'>('CASH');
   const [remarks, setRemarks] = useState('');
 
   const { mutate: collectPayment, isPending } = useCollectPayment();
@@ -97,7 +97,7 @@ export const CollectPaymentModal: React.FC<CollectPaymentModalProps> = ({ invoic
                 className="w-full p-2.5 rounded-xl bg-surface-raised border border-border text-xs font-semibold focus:outline-none"
               >
                 <option value="CASH">Cash Counter</option>
-                <option value="ONLINE_UPI">UPI / QR Code</option>
+                <option value="UPI">UPI / QR Code</option>
                 <option value="BANK_TRANSFER">Bank Transfer / NEFT</option>
               </select>
             </div>
