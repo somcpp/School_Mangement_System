@@ -105,6 +105,60 @@ export interface ReportCardResponse {
   };
 }
 
+/**
+ * The API returns { exam, student: { fullName, class, section }, subjects[], summary: { percentage,
+ * resultStatus } } — map it onto the shape the report card UI renders. Already-normalised input
+ * (with `results`) is passed through.
+ */
+export const normalizeReportCard = (raw: any): ReportCardResponse => {
+  if (!raw || Array.isArray(raw.results)) return raw;
+  const subjects: any[] = Array.isArray(raw.subjects) ? raw.subjects : [];
+  return {
+    school: {
+      name: raw.school?.name ?? '',
+      code: raw.school?.code ?? '',
+      affiliationNo: raw.school?.affiliationNo,
+      board: raw.school?.board ?? 'CBSE',
+      address: raw.school?.address,
+    },
+    student: {
+      id: raw.student?.id ?? '',
+      admissionNo: raw.student?.admissionNo ?? '',
+      name: raw.student?.fullName ?? raw.student?.name ?? '',
+      className: raw.student?.class ?? raw.student?.className ?? '',
+      sectionName: raw.student?.section ?? raw.student?.sectionName ?? '',
+      rollNumber: raw.student?.rollNumber,
+    },
+    exam: {
+      id: raw.exam?.id ?? '',
+      name: raw.exam?.name ?? '',
+      academicYear: raw.exam?.academicYear ?? '',
+    },
+    results: subjects.map((r) => {
+      const max = Number(r.maxMarks) || 0;
+      const obtained = Number(r.marksObtained) || 0;
+      return {
+        subjectName: r.subjectName,
+        subjectCode: r.subjectCode,
+        maxMarks: max,
+        passMarks: Number(r.passMarks) || 0,
+        marksObtained: obtained,
+        percentage: max > 0 ? Math.round((obtained / max) * 1000) / 10 : 0,
+        grade: r.grade ?? '',
+        status: r.isPassed === false ? 'FAILED' : 'PASSED',
+        remarks: r.remarks ?? undefined,
+      };
+    }),
+    summary: {
+      totalMaxMarks: Number(raw.summary?.totalMaxMarks) || 0,
+      totalMarksObtained: Number(raw.summary?.totalMarksObtained) || 0,
+      overallPercentage: Number(raw.summary?.percentage ?? raw.summary?.overallPercentage) || 0,
+      overallGrade: raw.summary?.overallGrade ?? '',
+      status: raw.summary?.resultStatus === 'FAIL' ? 'FAILED' : 'PASSED',
+    },
+  };
+};
+
 export const examService = {
   /**
    * Fetch all exams for current school
@@ -151,7 +205,7 @@ export const examService = {
    * Fetch official CBSE-format Student Report Card
    */
   async getStudentReportCard(examId: string, studentId: string): Promise<ReportCardResponse> {
-    const response = await api.get<{ data: ReportCardResponse }>(`/exams/${examId}/report-card/${studentId}`);
-    return response.data.data;
+    const response = await api.get<{ data: any }>(`/exams/${examId}/report-card/${studentId}`);
+    return normalizeReportCard(response.data.data);
   },
 };
